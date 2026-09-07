@@ -1,5 +1,5 @@
 {
   "title": "Proxmox VE 9.2 x86_64",
   "defaultOpen": true,
-  "pages": ["create-admin-user"]
+  "pages": ["create-admin-user", "enable-pci-passthrough"]
 }
