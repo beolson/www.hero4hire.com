@@ -33,5 +33,8 @@ export async function generateMetadata({
 }) {
   const page = source.getPage((await params).slug);
   if (!page) notFound();
-  return { title: page.data.title, description: page.data.description };
+  return {
+    title: page.data.title,
+    description: "description" in page.data ? page.data.description : undefined,
+  };
 }

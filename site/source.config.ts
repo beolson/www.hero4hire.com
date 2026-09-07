@@ -12,6 +12,37 @@ export const docs = defineDocs({
   meta: { schema: metaSchema },
 });
 
+const systemScriptPageSchema = pageSchema.omit({ description: true });
+
+const linuxSystemScriptSchema = systemScriptPageSchema.extend({
+  type: z.literal("system-script"),
+  os: z.enum([
+    "ubuntu",
+    "debian",
+    "rhel",
+    "rocky-linux",
+    "alma-linux",
+    "amazon-linux",
+  ]),
+  version: z.string().min(1),
+  arch: z.enum(["x86_64", "arm64"]),
+});
+
+const windowsSystemScriptSchema = systemScriptPageSchema.extend({
+  type: z.literal("system-script"),
+  os: z.literal("windows-server"),
+  version: z.string().min(1),
+  arch: z.enum(["x86_64", "arm64"]),
+});
+
+export const systemScripts = defineDocs({
+  dir: "../docs/systemscripts",
+  docs: {
+    schema: z.union([linuxSystemScriptSchema, windowsSystemScriptSchema]),
+  },
+  meta: { schema: metaSchema },
+});
+
 export const blogPosts = defineCollections({
   type: "doc",
   dir: "../blog",
