@@ -1,0 +1,56 @@
+---
+title: <Script title>
+type: system-script
+os: <allowed platform identifier>
+version: "<platform version>"
+arch: <x86_64 or arm64>
+---
+
+# <Script title>
+
+## What it does
+
+<Describe the result, prerequisites, scope, and system changes.>
+
+<SystemScript
+  os="<platform identifier>"
+  version="<platform version>"
+  arch="<architecture>"
+  parameters={[
+    {
+      name: "<parameter_name>",
+      label: "<Parameter label>",
+      description: "<What the value controls.>",
+      default: "",
+      required: true,
+    },
+  ]}
+  script={`#!/usr/bin/env bash
+(
+set -euo pipefail
+
+parameter_name='{{parameter_name}}'
+
+<researched script body>
+)
+`}
+/>
+
+## How it works
+
+<Explain the significant commands, safety checks, side effects, and deliberately avoided dependencies.>
+
+### Commands Used
+
+<div className="command-reference-table">
+
+| Command | Argument | Description |
+| --- | --- | --- |
+| `<command>` |  | <What the command does in this script.> |
+|  | `<argument>` | <What the argument does.> |
+
+</div>
+
+## References
+
+<Link directly to the authoritative platform documentation used to design the script.>

@@ -23,6 +23,7 @@ const linuxSystemScriptSchema = systemScriptPageSchema.extend({
     "rocky-linux",
     "alma-linux",
     "amazon-linux",
+    "proxmox-ve",
   ]),
   version: z.string().min(1),
   arch: z.enum(["x86_64", "arm64"]),

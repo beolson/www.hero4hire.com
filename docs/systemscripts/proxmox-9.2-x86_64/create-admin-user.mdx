@@ -1,0 +1,177 @@
+---
+title: Create administrator user
+type: system-script
+os: proxmox-ve
+version: "9.2"
+arch: x86_64
+---
+
+# Create administrator user
+
+## What it does
+
+Creates a local Linux account for SSH access and a matching Proxmox VE account in the `pve` realm. The Proxmox account receives the built-in `PVEAdmin` role at `/`, which grants administrator access across the cluster.
+
+Optionally, it downloads the public SSH keys published by a GitHub account and installs them for the new local account. It does not install packages or grant the local account passwordless `sudo` access.
+
+Run this as `root` on any node in the cluster. Proxmox account and ACL changes are stored in the cluster configuration, while the Linux account and SSH keys are created only on the node where the script runs. Run it separately on each node where the user needs SSH access.
+
+<SystemScript
+  os="proxmox-ve"
+  version="9.2"
+  arch="x86_64"
+  parameters={[
+    {
+      name: "account_name",
+      label: "Account name",
+      description: "Lowercase Linux username; the Proxmox account will be name@pve.",
+      default: "",
+      required: true,
+    },
+    {
+      name: "account_password",
+      label: "Password",
+      description: "Used for both the local Linux account and the Proxmox pve-realm account.",
+      default: "",
+      required: true,
+      type: "password",
+    },
+    {
+      name: "github_user",
+      label: "GitHub user (optional)",
+      description: "Public SSH keys from github.com/USER.keys are installed for local SSH access.",
+      default: "",
+    },
+  ]}
+  script={`#!/usr/bin/env bash
+(
+set -euo pipefail
+
+account_name='{{account_name}}'
+account_password='{{account_password}}'
+github_user='{{github_user}}'
+pve_user="\${account_name}@pve"
+keys_file=''
+
+cleanup() {
+  if [ -n "$keys_file" ]; then
+    rm -f "$keys_file"
+  fi
+}
+trap cleanup EXIT
+
+if [ "$(id -u)" -ne 0 ]; then
+  printf '%s\\n' 'Error: run this script as root.' >&2
+  exit 1
+fi
+
+if ! command -v pveum >/dev/null 2>&1; then
+  printf '%s\\n' 'Error: pveum was not found; this must run on Proxmox VE.' >&2
+  exit 1
+fi
+
+if ! [[ "$account_name" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+  printf '%s\\n' 'Error: account name must be 1–32 lowercase letters, digits, underscores, or hyphens, and cannot start with a digit or hyphen.' >&2
+  exit 1
+fi
+
+if [ -z "$account_password" ] || [[ "$account_password" == *$'\\n'* ]]; then
+  printf '%s\\n' 'Error: password must not be empty or contain a newline.' >&2
+  exit 1
+fi
+
+if [ -n "$github_user" ] && ! [[ "$github_user" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$ ]]; then
+  printf '%s\\n' 'Error: GitHub user name is invalid.' >&2
+  exit 1
+fi
+
+if id "$account_name" >/dev/null 2>&1; then
+  printf 'Error: local account %s already exists.\\n' "$account_name" >&2
+  exit 1
+fi
+
+if pveum user list | awk 'NR > 1 { print $1 }' | grep -Fx "$pve_user" >/dev/null; then
+  printf 'Error: Proxmox account %s already exists.\\n' "$pve_user" >&2
+  exit 1
+fi
+
+if [ -n "$github_user" ]; then
+  if ! command -v curl >/dev/null 2>&1; then
+    printf '%s\\n' 'Error: curl is required only when importing GitHub SSH keys.' >&2
+    exit 1
+  fi
+
+  keys_file=$(mktemp)
+  curl --fail --location --silent --show-error "https://github.com/$github_user.keys" > "$keys_file"
+  if [ ! -s "$keys_file" ]; then
+    printf 'Error: GitHub user %s has no public SSH keys.\\n' "$github_user" >&2
+    exit 1
+  fi
+fi
+
+useradd --create-home --shell /bin/bash "$account_name"
+printf '%s:%s\\n' "$account_name" "$account_password" | chpasswd
+
+if [ -n "$github_user" ]; then
+  install -d -m 700 -o "$account_name" -g "$account_name" "/home/$account_name/.ssh"
+  install -m 600 -o "$account_name" -g "$account_name" "$keys_file" "/home/$account_name/.ssh/authorized_keys"
+fi
+
+pveum user add "$pve_user" --password "$account_password"
+pveum acl modify / --user "$pve_user" --role PVEAdmin
+
+printf 'Created local account %s and Proxmox administrator %s.\\n' "$account_name" "$pve_user"
+)
+`}
+/>
+
+## How it works
+
+`useradd` and `chpasswd` create the node-local login. `pveum user add` creates the cluster-wide `@pve` account, and `pveum acl modify / --role PVEAdmin` assigns its administrator permissions. When a GitHub user is supplied, `curl` retrieves its public-key feed directly; no GitHub token, GitHub CLI, JSON parser, or additional package is used.
+
+The password is passed to `pveum` because its command-line interface requires the password value. Since the generated script necessarily contains that password, run it from a trusted terminal and avoid saving or sharing the copied script afterward.
+
+### Commands Used
+
+<div className="command-reference-table">
+
+| Command | Argument | Description |
+| --- | --- | --- |
+| `id` |  | Checks that the script runs as root and whether the requested local account already exists. |
+|  | `-u` | Prints the numeric ID of the current user. Root has ID `0`. |
+|  | Account name | Checks whether that local account already exists. |
+| `pveum` |  | Proxmox VE's user-management command; it checks for an existing account, creates the `@pve` account, and assigns its administrator ACL. |
+|  | `user list` | Lists existing Proxmox VE accounts before creation. |
+|  | `user add name@pve` | Creates the account in Proxmox's built-in `pve` realm. |
+|  | `--password` | Sets the password for the `@pve` account. |
+|  | `acl modify /` | Changes permissions at the cluster root path. |
+|  | `--user name@pve` | Selects the account receiving the ACL. |
+|  | `--role PVEAdmin` | Grants Proxmox VE's built-in administrator role. |
+| `useradd` |  | Creates the local Linux account and its home directory on the node where the script runs. |
+|  | `--create-home` | Creates `/home/name` for the new account. |
+|  | `--shell /bin/bash` | Sets Bash as the account's login shell. |
+|  | Account name | Names the new local account. |
+| `chpasswd` |  | Sets the local Linux account password from the `name:password` value supplied on standard input. It uses no arguments. |
+| `curl` |  | Downloads public keys from `github.com/USER.keys` only when a GitHub user is supplied. |
+|  | `--fail` | Treats HTTP error responses as failures. |
+|  | `--location` | Follows redirects returned by GitHub. |
+|  | `--silent` | Suppresses transfer progress output. |
+|  | `--show-error` | Still displays an error if the transfer fails. |
+| `mktemp` |  | Creates a securely named temporary file for downloaded SSH keys before any local account is changed. It uses no arguments. |
+| `install` |  | Creates the optional `.ssh` directory and installs the downloaded key file with ownership and permissions suitable for OpenSSH. |
+|  | `-d` | Creates a directory rather than copying a file. |
+|  | `-m 700` | Makes the `.ssh` directory accessible only to its owner. |
+|  | `-m 600` | Makes `authorized_keys` readable and writable only by its owner. |
+|  | `-o` / `-g` | Sets the local account as the file or directory owner and group. |
+| `awk` |  | Extracts account IDs from `pveum user list` output before the existence check. |
+| `grep` |  | Searches those account IDs with `-Fx` for an exact, whole-line match. |
+|  | `-F` | Treats the account ID as fixed text rather than a regular expression. |
+|  | `-x` | Requires the entire line to match the account ID. |
+| `rm` |  | Removes the temporary GitHub-key file at script exit. |
+|  | `-f` | Lets cleanup succeed even when no temporary file was created. |
+
+</div>
+
+## References
+
+Proxmox documents user administration through `pveum` and its ACL model in the [Proxmox VE Administration Guide](https://pve.proxmox.com/pve-docs/pve-admin-guide.pdf). GitHub’s [public SSH keys API](https://docs.github.com/en/rest/users/keys#list-public-keys-for-a-user) describes the public-key data associated with a GitHub user.

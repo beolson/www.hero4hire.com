@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -11,6 +11,7 @@ export type SystemScriptParameter = {
   description: string;
   default: string;
   required?: boolean;
+  type?: "password" | "text";
 };
 
 type SystemScriptProps = {
@@ -23,7 +24,9 @@ type SystemScriptProps = {
 
 function substituteParameters(script: string, values: Record<string, string>) {
   return script.replace(/{{([A-Za-z][A-Za-z0-9_-]*)}}/g, (token, name) =>
-    Object.hasOwn(values, name) ? values[name] : token,
+    Object.hasOwn(values, name)
+      ? values[name].replaceAll("'", "'\"'\"'")
+      : token,
   );
 }
 
@@ -34,6 +37,24 @@ function formatLabel(value: string | undefined) {
     .split("-")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+async function copyText(value: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    return;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.append(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+
+    if (!copied) throw new Error("Clipboard access was denied");
+  }
 }
 
 export function SystemScript({
@@ -48,7 +69,9 @@ export function SystemScript({
       parameters.map((parameter) => [parameter.name, parameter.default]),
     ),
   );
+  const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const renderedScript = useMemo(
     () => substituteParameters(script, values),
     [script, values],
@@ -57,10 +80,52 @@ export function SystemScript({
     (parameter) => !parameter.required || values[parameter.name]?.trim(),
   );
 
+  useEffect(() => {
+    function syncAutofilledValues() {
+      setValues((current) => ({
+        ...current,
+        ...Object.fromEntries(
+          parameters.map((parameter) => [
+            parameter.name,
+            inputs.current[parameter.name]?.value ?? "",
+          ]),
+        ),
+      }));
+    }
+
+    const firstCheck = window.setTimeout(syncAutofilledValues, 50);
+    const secondCheck = window.setTimeout(syncAutofilledValues, 500);
+    return () => {
+      window.clearTimeout(firstCheck);
+      window.clearTimeout(secondCheck);
+    };
+  }, [parameters]);
+
   async function copyScript() {
-    await navigator.clipboard.writeText(renderedScript);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2_000);
+    const currentValues = Object.fromEntries(
+      parameters.map((parameter) => [
+        parameter.name,
+        inputs.current[parameter.name]?.value ?? values[parameter.name] ?? "",
+      ]),
+    );
+    const missing = parameters.find(
+      (parameter) =>
+        parameter.required && !currentValues[parameter.name]?.trim(),
+    );
+
+    if (missing) {
+      inputs.current[missing.name]?.focus();
+      return;
+    }
+
+    try {
+      await copyText(substituteParameters(script, currentValues));
+      setCopyFailed(false);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2_000);
+    } catch {
+      setCopyFailed(true);
+    }
   }
 
   return (
@@ -90,15 +155,20 @@ export function SystemScript({
                     <span className="text-xs text-destructive">Required</span>
                   ) : null}
                   <Input
+                    defaultValue={parameter.default}
                     id={`system-script-${parameter.name}`}
-                    onChange={(event) =>
+                    onInput={(event) => {
+                      const value = event.currentTarget.value;
                       setValues((current) => ({
                         ...current,
-                        [parameter.name]: event.target.value,
-                      }))
-                    }
+                        [parameter.name]: value,
+                      }));
+                    }}
+                    ref={(element) => {
+                      inputs.current[parameter.name] = element;
+                    }}
                     required={parameter.required}
-                    value={values[parameter.name] ?? ""}
+                    type={parameter.type ?? "text"}
                   />
                   <span className="text-xs text-muted-foreground">
                     {parameter.description}
@@ -121,7 +191,11 @@ export function SystemScript({
                 ) : (
                   <Copy className="size-4" />
                 )}
-                {copied ? "Copied" : "Copy script"}
+                {copied
+                  ? "Copied"
+                  : copyFailed
+                    ? "Copy failed"
+                    : "Copy script"}
               </Button>
             </div>
             <pre className="max-h-96 overflow-auto rounded-lg border bg-muted p-4 text-sm">

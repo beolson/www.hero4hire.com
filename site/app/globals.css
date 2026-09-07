@@ -2,6 +2,25 @@
 @import "fumadocs-ui/css/shadcn.css";
 @import "fumadocs-ui/css/preset.css";
 
+.command-reference-table {
+  overflow-x: auto;
+}
+
+.command-reference-table table {
+  border: 1px solid var(--color-fd-border);
+  border-collapse: collapse;
+}
+
+.command-reference-table th,
+.command-reference-table td {
+  border: 1px solid var(--color-fd-border);
+  padding: 0.5rem 0.75rem;
+}
+
+.command-reference-table th {
+  background: var(--color-fd-muted);
+}
+
 :root {
   --background: 0 0% 100%;
   --foreground: 240 10% 3.9%;

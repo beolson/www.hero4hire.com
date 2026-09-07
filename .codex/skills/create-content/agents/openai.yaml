@@ -1,0 +1,6 @@
+interface:
+  display_name: "Create Content"
+  short_description: "Create Hero4Hire documentation"
+  default_prompt: "Use $create-content to create or revise documentation content for this site."
+policy:
+  allow_implicit_invocation: true
