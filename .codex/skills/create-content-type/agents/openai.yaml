@@ -1,0 +1,6 @@
+interface:
+  display_name: "Create Content Type"
+  short_description: "Create Fumadocs content types"
+  default_prompt: "Use $create-content-type to add a new content type to this site."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,134 @@
+---
+title: Hostname report
+type: system-script
+os: ubuntu
+version: "22.04"
+arch: x86_64
+---
+
+# Hostname report
+
+## What it does
+
+Writes the five selected labels, the current hostname, and the running kernel version to standard output. It does not change the target system.
+
+<SystemScript
+  os="ubuntu"
+  version="22.04"
+  arch="x86_64"
+  parameters={[
+    {
+      name: "environment",
+      label: "Environment",
+      description: "A label included in the report.",
+      default: "",
+      required: true,
+    },
+    {
+      name: "application",
+      label: "Application",
+      description: "The application name included in the report.",
+      default: "",
+      required: true,
+    },
+    {
+      name: "owner",
+      label: "Owner",
+      description: "The team or person responsible for the host.",
+      default: "",
+      required: true,
+    },
+    {
+      name: "region",
+      label: "Region",
+      description: "The deployment region included in the report.",
+      default: "",
+      required: true,
+    },
+    {
+      name: "ticket",
+      label: "Change ticket",
+      description: "The change or incident reference for this run.",
+      default: "",
+      required: true,
+    },
+  ]}
+  script={`#!/usr/bin/env bash
+(
+set -euo pipefail
+
+printf 'Environment: %s\\n' '{{environment}}'
+printf 'Application: %s\\n' '{{application}}'
+printf 'Owner: %s\\n' '{{owner}}'
+printf 'Region: %s\\n' '{{region}}'
+printf 'Change ticket: %s\\n' '{{ticket}}'
+printf 'Hostname: %s\\n' "$(hostname)"
+printf 'Kernel: %s\\n' "$(uname -r)"
+)
+`}
+/>
+
+## How it works
+
+The script uses standard Linux utilities available on Ubuntu. Each placeholder is filled from the Build script form before the script is copied. Its strict Bash settings run inside a subshell, so pasting the script into an interactive terminal does not change that terminal's shell options.
+
+### Commands Used
+
+#### env
+
+The shebang uses `env` to find and start Bash from the target system's `PATH` when the script is run as a file.
+
+<details>
+<summary>Arguments</summary>
+
+| Argument | What it does |
+| --- | --- |
+| `bash` | Starts the Bash shell that runs the script. |
+
+</details>
+
+#### set
+
+Configures Bash error handling inside the script's subshell.
+
+<details>
+<summary>Arguments</summary>
+
+| Argument | What it does |
+| --- | --- |
+| `-e` | Stops the script when a command fails. |
+| `-u` | Treats an unset variable as an error. |
+| `-o pipefail` | Makes a pipeline fail if any command in that pipeline fails. |
+
+</details>
+
+#### printf
+
+Prints each labeled value in the report.
+
+<details>
+<summary>Arguments</summary>
+
+| Argument | What it does |
+| --- | --- |
+| Format string, such as `'Environment: %s\\n'` | Provides the fixed label, `%s` placeholder, and newline for a report line. |
+| Value, such as `'{{environment}}'` | Replaces `%s` with the selected parameter value. |
+
+</details>
+
+#### hostname
+
+Returns the current system hostname for the report. This command uses no arguments.
+
+#### uname
+
+Returns system information for the report.
+
+<details>
+<summary>Arguments</summary>
+
+| Argument | What it does |
+| --- | --- |
+| `-r` | Prints the running kernel release. |
+
+</details>
