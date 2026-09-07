@@ -5,10 +5,5 @@ export function baseOptions(): BaseLayoutProps {
     nav: {
       title: "Hero4Hire",
     },
-    links: [
-      { text: "Home", url: "/" },
-      { text: "Docs", url: "/docs" },
-      { text: "Blog", url: "/blog" },
-    ],
   };
 }
