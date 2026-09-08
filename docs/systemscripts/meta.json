@@ -1,5 +1,9 @@
 {
   "title": "System Scripts",
   "defaultOpen": true,
-  "pages": ["ubuntu-22.04-x86_64", "proxmox-9.2-x86_64"]
+  "pages": [
+    "debian-13-x86_64",
+    "ubuntu-22.04-x86_64",
+    "proxmox-9.2-x86_64"
+  ]
 }

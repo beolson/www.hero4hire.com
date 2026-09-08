@@ -1,0 +1,5 @@
+{
+  "title": "Debian 13 x86_64",
+  "defaultOpen": true,
+  "pages": ["install-nvidia-driver"]
+}
