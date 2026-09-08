@@ -1,0 +1,103 @@
+---
+title: Install NVIDIA driver
+type: system-script
+os: debian
+version: "13"
+arch: x86_64
+---
+
+# Install NVIDIA driver
+
+## What it does
+
+Installs Debian 13 (Trixie)'s proprietary NVIDIA driver and its DKMS kernel module on one x86_64 host. It verifies that it is running as root on Debian 13, adds `contrib`, `non-free`, and `non-free-firmware` to the standard Debian APT source file, refreshes APT metadata, installs headers for the running kernel, and installs `nvidia-kernel-dkms` and `nvidia-driver`.
+
+The script modifies `/etc/apt/sources.list.d/debian.sources` and saves a same-directory `.bak` copy first. It does not configure CUDA, containers, X11 or Wayland, GPU passthrough, or Secure Boot key enrollment. Run it during a maintenance window: package installation can replace the kernel, and a reboot is required before the NVIDIA module can be loaded. On a Secure Boot-enabled system, complete the MOK enrollment prompted by DKMS before rebooting or the unsigned module will not load.
+
+This uses the proprietary kernel-module flavor for broad support across the GPUs supported by Debian's packaged driver. It intentionally stops if the standard Debian 13 deb822 source file is absent rather than guessing how to modify a custom mirror or third-party source configuration.
+
+<SystemScript
+  os="debian"
+  version="13"
+  arch="x86_64"
+  script={`#!/usr/bin/env bash
+(
+set -euo pipefail
+
+sources_file='/etc/apt/sources.list.d/debian.sources'
+backup_file="\${sources_file}.nvidia-driver.bak"
+
+if [ "$(id -u)" -ne 0 ]; then
+  printf '%s\\n' 'Error: run this script as root.' >&2
+  exit 1
+fi
+
+if [ "$(uname -m)" != 'x86_64' ]; then
+  printf '%s\\n' 'Error: this script supports x86_64 systems only.' >&2
+  exit 1
+fi
+
+if [ ! -r /etc/os-release ]; then
+  printf '%s\\n' 'Error: /etc/os-release is required to identify Debian 13.' >&2
+  exit 1
+fi
+
+. /etc/os-release
+if [ "\${ID:-}" != 'debian' ] || [ "\${VERSION_ID:-}" != '13' ]; then
+  printf '%s\\n' 'Error: this script supports Debian 13 (Trixie) only.' >&2
+  exit 1
+fi
+
+if [ ! -f "$sources_file" ] || ! grep -Eq '^Suites:.*(^|[[:space:]])trixie(-security|-updates)?([[:space:]]|$)' "$sources_file"; then
+  printf 'Error: expected Debian 13 deb822 sources in %s. Configure contrib, non-free, and non-free-firmware manually, then rerun.\\n' "$sources_file" >&2
+  exit 1
+fi
+
+cp --archive "$sources_file" "$backup_file"
+
+for component in contrib non-free non-free-firmware; do
+  sed -i -E '/^Components:/ { /(^|[[:space:]])'"$component"'([[:space:]]|$)/! s/$/ '"$component"'/ }' "$sources_file"
+done
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install --yes "linux-headers-$(uname -r)" nvidia-kernel-dkms nvidia-driver
+
+printf '%s\\n' 'NVIDIA driver packages are installed. Reboot the host, then run nvidia-smi to verify the driver.'
+)
+`}
+/>
+
+## How it works
+
+The driver is distributed by Debian as the `nvidia-driver` metapackage in the `non-free` component. Its DKMS kernel-module package builds a module for the installed kernel, so the script first installs the headers matching `uname -r`. It does not use NVIDIA's standalone installer, which is outside Debian's package management and can complicate kernel upgrades.
+
+Debian's NVIDIA guidance requires `contrib`, `non-free`, and `non-free-firmware` for Trixie sources. The script accepts the default deb822 source file only, makes an archive-preserving backup beside it, and adds each required component only when missing. It then uses `apt-get` to refresh available packages and install the driver stack. The `.bak` extension keeps the backup from being read as an APT source.
+
+DKMS may prompt for a Machine Owner Key (MOK) password when Secure Boot is enabled. This is expected; enroll that key in the firmware screen on the next boot. Reboot after a successful installation, then use `nvidia-smi` to confirm that the loaded module and userspace tools can communicate with the GPU. Debian's packaged Trixie driver does not support every NVIDIA GPU generation; review the NVIDIA Graphics Drivers guidance before using it with older hardware or an RTX 50-series (Blackwell) GPU.
+
+### Commands Used
+
+<div className="command-reference-table">
+
+| Command | Argument | Description |
+| --- | --- | --- |
+| `id` | `-u` | Verifies that the effective user is root. |
+| `uname` | `-m` | Confirms the machine is x86_64. |
+|  | `-r` | Supplies the running kernel release used to select matching headers. |
+| `grep` | `-E` | Checks that the standard source file targets a Trixie suite and that required APT components are present. |
+|  | `-q` | Performs those checks without printing matching text. |
+| `cp` | `--archive` | Preserves a metadata-aware backup of the APT source file before it is changed. |
+| `sed` | `-i` | Adds missing repository components directly to `Components:` fields. |
+| `apt-get` | `update` | Refreshes local package metadata after the source components change. |
+|  | `install --yes` | Installs noninteractively after APT resolves the driver, DKMS, and header dependencies. |
+|  | `linux-headers-$(uname -r)` | Installs headers for the currently running kernel so DKMS can build its NVIDIA module. |
+|  | `nvidia-kernel-dkms` | Installs Debian's DKMS package for the proprietary NVIDIA kernel module. |
+|  | `nvidia-driver` | Installs Debian's NVIDIA driver metapackage and associated userspace components. |
+| `nvidia-smi` |  | Recommended after reboot to verify that the driver is loaded and can communicate with the GPU. It is not run by the script. |
+
+</div>
+
+## References
+
+Debian's [NVIDIA Graphics Drivers guide](https://wiki.debian.org/NvidiaGraphicsDrivers) documents the required Trixie APT components, the `nvidia-kernel-dkms` and `nvidia-driver` packages, GPU support limitations, and Secure Boot considerations. The Debian package index describes the [Trixie `nvidia-driver` metapackage](https://packages.debian.org/trixie/nvidia-driver) and its availability in `non-free`. Debian's [Debian 13 release notes](https://www.debian.org/releases/stable/release-notes/) cover release-specific operational considerations.
