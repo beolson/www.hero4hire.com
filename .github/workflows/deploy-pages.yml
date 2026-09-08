@@ -1,7 +1,6 @@
 name: Build and deploy site
 
 on:
-  pull_request:
   push:
     branches:
       - main
@@ -11,7 +10,7 @@ permissions:
   deployments: write
 
 concurrency:
-  group: cloudflare-pages-${{ github.event.pull_request.number || github.ref }}
+  group: cloudflare-pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,10 +34,7 @@ jobs:
         working-directory: site
         run: bun run build
 
-      # GitHub does not provide repository secrets to pull requests from forks.
-      # Those pull requests still build successfully, but cannot be deployed.
       - name: Deploy to Cloudflare Pages
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -46,4 +42,4 @@ jobs:
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           command: >-
             pages deploy site/out --project-name=hero4hire
-            --branch=${{ github.event_name == 'pull_request' && github.head_ref || 'main' }}
+            --branch=main
