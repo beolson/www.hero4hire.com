@@ -45,3 +45,17 @@ bun run format
 ```
 
 `bun run check` runs Biome's combined lint and formatting validation. Run `bun run format` to apply Biome's formatting fixes.
+
+## Deployment
+
+GitHub Actions builds the static export and uploads it to the existing Cloudflare Pages project, `hero4hire`:
+
+- Pull requests from this repository receive a Cloudflare Pages preview deployment.
+- Pushes to `main` publish the production deployment for `hero4hire.com` and `www.hero4hire.com`.
+
+Before the first workflow run, add these repository Actions secrets:
+
+- `CLOUDFLARE_ACCOUNT_ID` — the Cloudflare account ID that owns the `hero4hire` Pages project.
+- `CLOUDFLARE_API_TOKEN` — a Cloudflare API token with **Account → Cloudflare Pages → Edit** permission, scoped to that account.
+
+Pull requests from forks are built but not deployed, because GitHub does not expose repository secrets to those workflows.
