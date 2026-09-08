@@ -44,6 +44,16 @@ export const systemScripts = defineDocs({
   meta: { schema: metaSchema },
 });
 
+const howToSchema = pageSchema.extend({
+  type: z.literal("how-to"),
+});
+
+export const howTos = defineDocs({
+  dir: "../docs/how-to",
+  docs: { schema: howToSchema },
+  meta: { schema: metaSchema },
+});
+
 export const blogPosts = defineCollections({
   type: "doc",
   dir: "../blog",
