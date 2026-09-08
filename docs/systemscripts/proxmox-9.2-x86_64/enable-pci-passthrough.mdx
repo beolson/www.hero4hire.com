@@ -1,0 +1,155 @@
+---
+title: Enable PCI and GPU passthrough
+type: system-script
+os: proxmox-ve
+version: "9.2"
+arch: x86_64
+---
+
+# Enable PCI and GPU passthrough
+
+## What it does
+
+Checks that this Proxmox VE node is running on supported x86_64 hardware with an active IOMMU, then discovers every NVIDIA PCI function and configures it for VFIO passthrough after the next reboot. It adds the appropriate Intel VT-d or AMD IOMMU kernel parameter, loads VFIO from the initramfs, and reserves every discovered NVIDIA device ID for `vfio-pci` before its usual host driver can claim it.
+
+Run it as `root` on the node that physically contains the device. It changes only that node's boot and module configuration; it does not modify a VM, migrate a device, or change cluster-wide configuration. It configures **all** NVIDIA PCI devices on the node, including GPU audio functions and any NVIDIA non-GPU hardware, so use it only when every NVIDIA device may be dedicated to guests. Shut down any guest that will use the device before rebooting the node. A passed-through GPU can no longer be used by the Proxmox host, so retain out-of-band or SSH access if it is the host's display adapter.
+
+Before running the script, enable **IOMMU** in the server firmware: **SVM/AMD-V** and **IOMMU** on AMD systems, or **Intel Virtualization Technology** and **VT-d** on Intel systems. For GPUs, enable **Above 4G Decoding** when the firmware offers it. The script cannot change firmware settings; it verifies their effective result by requiring active Linux IOMMU groups.
+
+<SystemScript
+  os="proxmox-ve"
+  version="9.2"
+  arch="x86_64"
+  script={`#!/usr/bin/env bash
+(
+set -euo pipefail
+
+# Proxmox administrative tools are commonly installed in /usr/sbin, which
+# may be absent from PATH in an SSH root shell or automation environment.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+fail() {
+  printf 'Error: %s\\n' "$*" >&2
+  exit 1
+}
+
+if [ "$(id -u)" -ne 0 ]; then
+  fail 'run this script as root.'
+fi
+
+for command in lspci update-initramfs; do
+  command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
+done
+
+command -v pveversion >/dev/null 2>&1 || fail 'pveversion was not found; this must run on Proxmox VE.'
+if ! pveversion | grep -q '^pve-manager/9\\.'; then
+  fail 'this script is for Proxmox VE 9.x.'
+fi
+
+[ "$(uname -m)" = 'x86_64' ] || fail 'PCI passthrough is supported by this script only on x86_64.'
+
+cpu_vendor=$(awk -F ': ' '/^vendor_id/ { print $2; exit }' /proc/cpuinfo)
+case "$cpu_vendor" in
+  GenuineIntel)
+    grep -qw vmx /proc/cpuinfo || fail 'Intel virtualization (VMX) is unavailable; enable Intel Virtualization Technology in firmware.'
+    iommu_parameter='intel_iommu=on'
+    firmware_setting='Intel VT-d'
+    ;;
+  AuthenticAMD)
+    grep -qw svm /proc/cpuinfo || fail 'AMD virtualization (SVM) is unavailable; enable SVM/AMD-V in firmware.'
+    iommu_parameter='amd_iommu=on'
+    firmware_setting='AMD IOMMU'
+    ;;
+  *)
+    fail "unsupported CPU vendor: $cpu_vendor"
+    ;;
+esac
+
+if [ ! -d /sys/kernel/iommu_groups ] || ! find /sys/kernel/iommu_groups -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .; then
+  fail "$firmware_setting is not active: Linux exposes no IOMMU groups. Enable the firmware setting, reboot, and try again."
+fi
+
+pci_ids=()
+mapfile -t selected_devices < <(lspci -Dnnd 10de: | awk '{ print $1 }' | sed 's/^0000://')
+[ "\${#selected_devices[@]}" -gt 0 ] || fail 'no NVIDIA PCI devices were found.'
+
+for device in "\${selected_devices[@]}"; do
+  sys_device="/sys/bus/pci/devices/0000:$device"
+  [ -d "$sys_device" ] || fail "NVIDIA PCI device $device was not found in sysfs."
+  [ -L "$sys_device/iommu_group" ] || fail "PCI device $device has no IOMMU group; verify $firmware_setting and reboot."
+
+  vendor_id=$(<"$sys_device/vendor")
+  device_id=$(<"$sys_device/device")
+  pci_ids+=("\${vendor_id#0x}:\${device_id#0x}")
+done
+
+pci_id_list=$(IFS=,; printf '%s' "\${pci_ids[*]}")
+timestamp=$(date +%Y%m%d%H%M%S)
+
+install -d -m 755 /etc/modprobe.d /etc/modules-load.d
+if [ -e /etc/modprobe.d/99-pci-passthrough.conf ]; then
+  cp -a /etc/modprobe.d/99-pci-passthrough.conf "/etc/modprobe.d/99-pci-passthrough.conf.$timestamp.bak"
+fi
+printf 'options vfio-pci ids=%s\\n' "$pci_id_list" > /etc/modprobe.d/99-pci-passthrough.conf
+printf '%s\\n' vfio vfio_iommu_type1 vfio_pci > /etc/modules-load.d/vfio.conf
+
+if [ -f /etc/kernel/cmdline ]; then
+  cp -a /etc/kernel/cmdline "/etc/kernel/cmdline.$timestamp.bak"
+  kernel_cmdline=$(</etc/kernel/cmdline)
+  for parameter in "$iommu_parameter" iommu=pt; do
+    case " $kernel_cmdline " in
+      *" $parameter "*) ;;
+      *) kernel_cmdline="$kernel_cmdline $parameter" ;;
+    esac
+  done
+  printf '%s\\n' "$kernel_cmdline" > /etc/kernel/cmdline
+  command -v proxmox-boot-tool >/dev/null 2>&1 || fail 'proxmox-boot-tool is required when /etc/kernel/cmdline exists.'
+  proxmox-boot-tool refresh
+else
+  command -v update-grub >/dev/null 2>&1 || fail 'update-grub was not found; this node needs either GRUB or proxmox-boot-tool.'
+  if [ -e /etc/default/grub.d/99-pci-passthrough.cfg ]; then
+    cp -a /etc/default/grub.d/99-pci-passthrough.cfg "/etc/default/grub.d/99-pci-passthrough.cfg.$timestamp.bak"
+  fi
+  install -d -m 755 /etc/default/grub.d
+  printf 'GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT %s iommu=pt"\\n' "$iommu_parameter" > /etc/default/grub.d/99-pci-passthrough.cfg
+  update-grub
+fi
+
+update-initramfs -u -k all
+
+printf 'Configured VFIO for: %s\\n' "\${selected_devices[*]}"
+printf '%s\\n' 'Reboot this node before assigning the devices to a VM.'
+printf '%s\\n' 'After reboot, verify each device with: lspci -nnk -s ADDRESS (Kernel driver in use: vfio-pci).'
+printf '%s\\n' 'For a multi-function GPU, add every required function (usually graphics and HDMI/DP audio) to the VM.'
+)
+`}
+/>
+
+## How it works
+
+The CPU virtualization flag is only a preliminary check. The decisive firmware check is the presence of populated `/sys/kernel/iommu_groups`: without them, DMA isolation is not active and the script exits without changing files. `lspci -Dnnd 10de:` discovers every PCI function whose vendor ID is NVIDIA (`10de`), then the script confirms each one exists and belongs to an IOMMU group. Inspect a group before proceeding with `find /sys/kernel/iommu_groups/N/devices -maxdepth 1 -printf '%f\\n'`; devices in the same group must remain together on the host or be passed through together.
+
+The script first sets a standard administrative `PATH`, since Proxmox boot tools such as `update-initramfs`, `update-grub`, and `proxmox-boot-tool` are commonly installed in `/usr/sbin`. It then selects `amd_iommu=on` for AMD or `intel_iommu=on` for Intel and adds `iommu=pt`. On hosts using Proxmox's `proxmox-boot-tool`, it updates `/etc/kernel/cmdline` and refreshes the boot entries. On GRUB hosts such as `pve-01`, it adds a small `/etc/default/grub.d/` fragment and regenerates GRUB. Its dedicated VFIO files are backed up before replacement, and `update-initramfs` makes the modules and PCI-ID binding available early in boot. It deliberately does not blacklist broad GPU drivers: binding the selected vendor/device IDs to VFIO early avoids disabling unrelated GPUs of the same vendor.
+
+This detects multi-function GPU hardware automatically. For example, on the inspected `pve-01`, it finds the RTX 3060 graphics function `01:00.0` and its audio controller `01:00.1`; their IOMMU group contains exactly those two functions. It also means an NVIDIA NIC, USB controller, or other NVIDIA hardware would be configured if present. After reboot, use the Proxmox UI's **Hardware → Add → PCI Device**, or `qm set`, to assign the verified device(s) to a stopped VM. PCI devices are node-local and prevent normal VM migration unless equivalent hardware and a Proxmox resource mapping are configured on destination nodes.
+
+### Commands Used
+
+<div className="command-reference-table">
+
+| Command | Argument | Description |
+| --- | --- | --- |
+| `pveversion` |  | Verifies that the host is Proxmox VE 9.x. |
+| `lspci` | `-Dnnd 10de:` | Discovers every NVIDIA PCI function by its vendor ID. |
+|  | `-nnk -s ADDRESS` | Lists a discovered PCI function, numeric IDs, and the driver in use; use it after reboot to confirm `vfio-pci`. |
+| `find` | `/sys/kernel/iommu_groups` | Checks for active IOMMU groups and can show the devices sharing a group. |
+| `update-grub` |  | Regenerates GRUB's configuration when the node boots through GRUB. |
+| `proxmox-boot-tool` | `refresh` | Refreshes boot entries after changing `/etc/kernel/cmdline` on proxmox-boot-tool installations. |
+| `update-initramfs` | `-u -k all` | Rebuilds initramfs images for all installed kernels so VFIO claims the chosen IDs early in boot. |
+| `qm` | `set VMID -hostpci0 ADDRESS` | Optional CLI method to add a verified PCI device to a stopped VM; it is not run by this script. |
+
+</div>
+
+## References
+
+Proxmox VE documents [general PCI(e) passthrough requirements and IOMMU activation](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#qm_pci_passthrough), [host PCI-device assignment](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#qm_pci_passthrough_host) and [PCI resource mappings for clusters](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#resource_mapping). The Linux kernel documents the [VFIO interface](https://www.kernel.org/doc/html/latest/driver-api/vfio.html) and [IOMMU group model](https://www.kernel.org/doc/html/latest/driver-api/iommu.html).
