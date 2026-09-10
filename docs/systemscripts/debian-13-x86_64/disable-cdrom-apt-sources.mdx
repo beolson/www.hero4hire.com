@@ -1,0 +1,164 @@
+---
+title: Disable CD-ROM APT sources
+type: system-script
+os: debian
+version: "13"
+arch: x86_64
+---
+
+# Disable CD-ROM APT sources
+
+## What it does
+
+Disables configured CD-ROM, DVD, and USB-media APT sources on one Debian 13 (Trixie) x86_64 host, then refreshes APT package metadata. It supports both traditional `deb cdrom:` entries in `/etc/apt/sources.list` and `*.list` files, and CD-ROM-only stanzas in Debian 13's deb822 `*.sources` files. Network, local-file, and other APT sources are left unchanged.
+
+Run the script directly from an account with `sudo` access; it prompts once for authorization. Before changing a source file, it creates a timestamped archive-preserving backup in the same directory, with a name that APT will not read. It comments traditional CD-ROM source lines and changes a CD-ROM-only deb822 stanza to `Enabled: no`. It does not remove package caches, install packages, or delete source files.
+
+<SystemScript
+  os="debian"
+  version="13"
+  arch="x86_64"
+  script={`#!/usr/bin/env bash
+(
+set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+  if ! command -v sudo >/dev/null 2>&1; then
+    printf '%s\\n' 'Error: sudo is required to update APT source configuration.' >&2
+    exit 1
+  fi
+  sudo -v
+fi
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+if [ "$(uname -m)" != 'x86_64' ] || [ ! -r /etc/os-release ]; then
+  printf '%s\\n' 'Error: this script supports Debian 13 x86_64 only.' >&2
+  exit 1
+fi
+
+. /etc/os-release
+if [ "$ID" != 'debian' ] || [ "$VERSION_ID" != '13' ]; then
+  printf '%s\\n' 'Error: this script supports Debian 13 (Trixie) only.' >&2
+  exit 1
+fi
+
+shopt -s nullglob
+source_files=(
+  /etc/apt/sources.list
+  /etc/apt/sources.list.d/*.list
+  /etc/apt/sources.list.d/*.sources
+)
+changed_count=0
+backup_timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+
+for source_file in "\${source_files[@]}"; do
+  [ -f "$source_file" ] || continue
+  staging_file="$(mktemp)"
+
+  case "$source_file" in
+    *.sources)
+      as_root awk '
+        function emit_stanza(    i, has_cdrom_uri, has_enabled) {
+          if (line_count == 0) return
+
+          has_cdrom_uri = 0
+          for (i = 1; i <= line_count; i++) {
+            if (lines[i] ~ /^URIs:[[:space:]]*cdrom:[^[:space:]]+[[:space:]]*$/) {
+              has_cdrom_uri = 1
+            }
+          }
+
+          if (has_cdrom_uri) {
+            has_enabled = 0
+            for (i = 1; i <= line_count; i++) {
+              if (lines[i] ~ /^Enabled:/) {
+                print "Enabled: no"
+                has_enabled = 1
+              } else {
+                print lines[i]
+              }
+            }
+            if (!has_enabled) print "Enabled: no"
+          } else {
+            for (i = 1; i <= line_count; i++) print lines[i]
+          }
+        }
+
+        /^[[:space:]]*$/ {
+          emit_stanza()
+          print
+          delete lines
+          line_count = 0
+          next
+        }
+
+        { lines[++line_count] = $0 }
+
+        END { emit_stanza() }
+      ' "$source_file" > "$staging_file"
+      ;;
+    *)
+      as_root sed -E \
+        '/^[[:space:]]*(deb|deb-src)([[:space:]]+\\[[^]]+\\])?[[:space:]]+cdrom:/ s/^/# /' \
+        "$source_file" > "$staging_file"
+      ;;
+  esac
+
+  if ! cmp -s "$source_file" "$staging_file"; then
+    backup_file="$(dirname "$source_file")/.$(basename "$source_file").cdrom-disabled.$backup_timestamp.bak"
+    as_root cp --archive "$source_file" "$backup_file"
+    source_mode="$(as_root stat -c '%a' "$source_file")"
+    as_root install -m "$source_mode" "$staging_file" "$source_file"
+    printf 'Disabled CD-ROM APT source entries in %s (backup: %s)\\n' "$source_file" "$backup_file"
+    changed_count=$((changed_count + 1))
+  fi
+
+  rm -f "$staging_file"
+done
+
+if [ "$changed_count" -eq 0 ]; then
+  printf '%s\\n' 'No active CD-ROM APT sources were found.'
+else
+  printf 'Disabled CD-ROM APT sources in %s file(s).\\n' "$changed_count"
+fi
+
+as_root apt-get update
+)
+`}
+/>
+
+## How it works
+
+APT reads the traditional `/etc/apt/sources.list` file, `*.list` fragments, and deb822 `*.sources` fragments under `/etc/apt/sources.list.d/`. The script examines only those recognized filenames. In one-line files, an active `deb` or `deb-src` entry whose URI is `cdrom:` is prefixed with `#`. In deb822 files, it disables a stanza only when its `URIs:` field contains a single CD-ROM URI, avoiding accidental removal of a network mirror bundled in the same stanza.
+
+The script writes each transformed file to a temporary location and compares it to the original. When a change is needed, it makes an archive-preserving, timestamped backup beside the source file, preserves the original file mode, and replaces the source. Backup names do not end in `.list` or `.sources`, so APT does not treat them as active configuration. `apt-get update` runs afterward and will fail visibly if a remaining source is invalid or unavailable.
+
+The `cdrom` scheme is a supported APT transport for removable media and is normally registered with `apt-cdrom`. Disable it when the media is not intentionally available to the server; retain the generated backup if it must be restored later.
+
+### Commands Used
+
+<div className="command-reference-table">
+
+| Command | Argument | Description |
+| --- | --- | --- |
+| `sudo` | `-v` | Prompts once for permission and refreshes the credential used for privileged source-file changes. |
+| `awk` |  | Adds or changes `Enabled: no` only for CD-ROM-only deb822 source stanzas. |
+| `sed` | `-E` | Comments active `deb cdrom:` and `deb-src cdrom:` entries in traditional source files. |
+| `cmp` | `-s` | Detects whether a transformed source file differs before creating a backup or replacing it. |
+| `cp` | `--archive` | Creates a metadata-preserving backup beside each changed source file. |
+| `stat` | `-c %a` | Reads the original source file's permission mode. |
+| `install` | `-m` | Replaces a changed source file while preserving its permission mode. |
+| `apt-get` | `update` | Refreshes package metadata and verifies that active APT sources can be read. |
+
+</div>
+
+## References
+
+Debian's [APT sources.list manual](https://manpages.debian.org/trixie/apt/sources.list.5.en.html) documents source-file locations, recognized filename extensions, one-line and deb822 formats, and the `cdrom` URI scheme. Debian's [APT CD-ROM manual](https://manpages.debian.org/trixie/apt/apt-cdrom.8.en.html) documents how optical-media sources are registered. The [Debian 13 release notes](https://www.debian.org/releases/trixie/release-notes/) describe Trixie's deb822 source-file convention.
