@@ -1,5 +1,9 @@
 {
   "title": "Debian 13 x86_64",
   "defaultOpen": true,
-  "pages": ["install-nvidia-driver"]
+  "pages": [
+    "install-nvidia-driver",
+    "configure-github-ssh-access",
+    "disable-cdrom-apt-sources"
+  ]
 }

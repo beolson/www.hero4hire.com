@@ -1,0 +1,262 @@
+---
+title: Configure GitHub public-key SSH access
+type: system-script
+os: debian
+version: "13"
+arch: x86_64
+---
+
+# Configure GitHub public-key SSH access
+
+## What it does
+
+Configures the non-root user who invokes this script through `sudo` for SSH access on one Debian 13 (Trixie) x86_64 server. It fetches that user's public SSH keys from one GitHub username immediately, then again at 00:00, 04:00, 08:00, 12:00, 16:00, and 20:00 in the server's local timezone. Each successful fetch atomically replaces the target user's `~/.ssh/authorized_keys`, so removed GitHub keys lose access at the next refresh.
+
+The script also changes SSH authentication for the entire server: it requires public-key authentication and disables password, keyboard-interactive, GSSAPI, host-based, and empty-password authentication. Existing SSH users must already have a working public key before this runs. It installs Debian's `curl` package if needed, adds a root-owned sync helper and systemd service/timer, creates `/etc/ssh/sshd_config.d/99-github-publickey-only.conf`, validates the full SSH configuration, and reloads `ssh.service` only after validation succeeds.
+
+Run this directly from the intended non-root account. It prompts for that account's `sudo` password when it needs elevated access. Keep the current SSH session open until a new public-key login has succeeded. This is public-key-only authentication, not OpenSSH user-certificate authentication: GitHub profile keys are ordinary public keys and are the sole managed access source for the target account.
+
+<SystemScript
+  os="debian"
+  version="13"
+  arch="x86_64"
+  parameters={[
+    {
+      name: "github_username",
+      label: "GitHub username",
+      description: "The single GitHub account whose public SSH keys may log in as the sudo-invoking user.",
+      default: "",
+      required: true,
+    },
+  ]}
+  script={`#!/usr/bin/env bash
+(
+set -euo pipefail
+
+github_username='{{github_username}}'
+
+if [ "$(id -u)" -eq 0 ]; then
+  target_user="\${SUDO_USER:-}"
+  if [ -z "$target_user" ] || [ "$target_user" = 'root' ]; then
+    printf '%s\\n' 'Error: run this directly from the non-root account to configure, not from a root shell.' >&2
+    exit 1
+  fi
+else
+  target_user="$(id -un)"
+  if ! command -v sudo >/dev/null 2>&1; then
+    printf '%s\\n' 'Error: sudo is required to configure SSH and the systemd timer.' >&2
+    exit 1
+  fi
+  sudo -v
+fi
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+if [ "$target_user" = 'root' ]; then
+  printf '%s\\n' 'Error: root cannot be the target account.' >&2
+  exit 1
+fi
+
+if ! printf '%s' "$target_user" | grep -Eq '^[a-z_][a-z0-9_-]*[$]?$'; then
+  printf '%s\\n' 'Error: the sudo-invoking username is not safe for this script.' >&2
+  exit 1
+fi
+
+if ! printf '%s' "$github_username" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$|^[A-Za-z0-9]$'; then
+  printf '%s\\n' 'Error: enter a valid GitHub username.' >&2
+  exit 1
+fi
+
+if [ "$(uname -m)" != 'x86_64' ] || [ ! -r /etc/os-release ]; then
+  printf '%s\\n' 'Error: this script supports Debian 13 x86_64 only.' >&2
+  exit 1
+fi
+
+. /etc/os-release
+if [ "\${ID:-}" != 'debian' ] || [ "\${VERSION_ID:-}" != '13' ]; then
+  printf '%s\\n' 'Error: this script supports Debian 13 (Trixie) only.' >&2
+  exit 1
+fi
+
+target_home="$(getent passwd "$target_user" | cut -d: -f6)"
+target_group="$(id -gn "$target_user")"
+if [ -z "$target_home" ] || [ ! -d "$target_home" ]; then
+  printf '%s\\n' 'Error: unable to find a usable home directory for the sudo-invoking user.' >&2
+  exit 1
+fi
+
+if [ ! -x /usr/sbin/sshd ]; then
+  printf '%s\\n' 'Error: openssh-server is required; install it with: sudo apt-get install openssh-server' >&2
+  exit 1
+fi
+
+if ! as_root systemctl cat ssh.service >/dev/null 2>&1; then
+  printf '%s\\n' 'Error: ssh.service is required. Verify that openssh-server is installed and systemd is the active init system.' >&2
+  exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+if ! command -v curl >/dev/null 2>&1; then
+  as_root apt-get update
+  as_root apt-get install --yes curl
+fi
+
+as_root install -d -m 0755 /etc/github-ssh-key-sync /usr/local/libexec
+as_root install -d -m 0700 -o "$target_user" -g "$target_group" "$target_home/.ssh"
+
+sync_config="/etc/github-ssh-key-sync/$target_user.conf"
+sync_helper='/usr/local/libexec/github-ssh-key-sync'
+service_name="github-ssh-key-sync-$target_user.service"
+timer_name="github-ssh-key-sync-$target_user.timer"
+
+as_root install -m 0644 /dev/stdin "$sync_config" <<EOF
+target_user='$target_user'
+target_home='$target_home'
+github_username='$github_username'
+EOF
+
+as_root install -m 0755 /dev/stdin "$sync_helper" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -ne 1 ] || [ ! -r "$1" ]; then
+  printf '%s\\n' 'Error: expected a readable sync configuration file.' >&2
+  exit 1
+fi
+
+. "$1"
+keys_dir="$target_home/.ssh"
+keys_file="$keys_dir/authorized_keys"
+temporary_keys="$(mktemp "$keys_dir/.authorized_keys.github.XXXXXX")"
+cleanup() {
+  rm -f "$temporary_keys"
+}
+trap cleanup EXIT
+
+curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 --max-time 30 \\
+  "https://github.com/$github_username.keys" > "$temporary_keys"
+
+if [ ! -s "$temporary_keys" ]; then
+  printf '%s\\n' 'Error: GitHub returned no SSH keys; keeping the current authorized_keys file.' >&2
+  exit 1
+fi
+
+if ! ssh-keygen -l -f "$temporary_keys" >/dev/null 2>&1; then
+  printf '%s\\n' 'Error: GitHub returned invalid SSH key data; keeping the current authorized_keys file.' >&2
+  exit 1
+fi
+
+chmod 0600 "$temporary_keys"
+mv -f "$temporary_keys" "$keys_file"
+EOF
+
+as_root install -m 0644 /dev/stdin "/etc/systemd/system/$service_name" <<EOF
+[Unit]
+Description=Refresh GitHub SSH keys for $target_user
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=$target_user
+Group=$target_group
+ExecStart=$sync_helper $sync_config
+EOF
+
+as_root install -m 0644 /dev/stdin "/etc/systemd/system/$timer_name" <<EOF
+[Unit]
+Description=Refresh GitHub SSH keys for $target_user every four hours
+
+[Timer]
+OnCalendar=*-*-* 00/4:00:00
+Persistent=true
+Unit=$service_name
+
+[Install]
+WantedBy=timers.target
+EOF
+
+as_root systemctl daemon-reload
+as_root systemctl start "$service_name"
+as_root systemctl enable --now "$timer_name"
+
+auth_config='/etc/ssh/sshd_config.d/99-github-publickey-only.conf'
+auth_staging="$(as_root mktemp /etc/ssh/sshd_config.d/.99-github-publickey-only.XXXXXX)"
+auth_backup="$(as_root mktemp /etc/ssh/sshd_config.d/.99-github-publickey-only.backup.XXXXXX)"
+had_auth_config=false
+
+if [ -e "$auth_config" ]; then
+  as_root cp --archive "$auth_config" "$auth_backup"
+  had_auth_config=true
+fi
+
+as_root install -m 0644 /dev/stdin "$auth_staging" <<'EOF'
+# Managed by Configure GitHub public-key SSH access.
+PubkeyAuthentication yes
+AuthenticationMethods publickey
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+GSSAPIAuthentication no
+HostbasedAuthentication no
+PermitEmptyPasswords no
+EOF
+as_root install -m 0644 "$auth_staging" "$auth_config"
+as_root rm -f "$auth_staging"
+
+if ! as_root /usr/sbin/sshd -t; then
+  if [ "$had_auth_config" = true ]; then
+    as_root mv -f "$auth_backup" "$auth_config"
+  else
+    as_root rm -f "$auth_config"
+  fi
+  printf '%s\\n' 'Error: SSH configuration validation failed; restored the previous managed configuration.' >&2
+  exit 1
+fi
+as_root rm -f "$auth_backup"
+
+as_root systemctl reload ssh.service
+printf 'SSH public-key-only authentication is enabled. GitHub keys for %s now refresh every four hours. Verify a new SSH login before ending this session.\\n' "$target_user"
+)
+`}
+/>
+
+## How it works
+
+The script derives the account from the current non-root shell and prompts with `sudo -v` before making privileged changes. When it is already running through `sudo`, it uses `SUDO_USER`; direct-root execution is rejected. This prevents a copied command from silently configuring root or an unintended account. It validates the operating system, CPU architecture, account home directory, SSH daemon, and GitHub username before changing anything. `curl` is the only package it may install; it is Debian's standard HTTPS transfer client and is required for periodic downloads.
+
+The root-owned helper is started by systemd as the target user, so its recurring write to `~/.ssh/authorized_keys` cannot acquire root privileges through a user-controlled home directory. The helper downloads GitHub's public-key text endpoint over HTTPS, requires a nonempty key set that `ssh-keygen` can parse, then renames a temporary file in the same directory into place. A network error, missing profile, or malformed response therefore preserves the last known-good keys.
+
+The timer uses an `OnCalendar` expression for six four-hourly runs each day and `Persistent=true` to catch up once after a missed calendar event. The initial service run must succeed before the script installs the SSH policy. The managed drop-in is then tested with `sshd -t`; a failed test restores the prior version and does not reload the daemon. A reload, rather than restart, avoids needlessly terminating existing SSH sessions.
+
+`AuthenticationMethods publickey` is the setting that makes public-key authentication mandatory. The related settings disable other interactive and network authentication methods explicitly. This affects every SSH account on the host; it does not disable root public-key authentication or manage other users' authorized keys.
+
+### Commands Used
+
+<div className="command-reference-table">
+
+| Command | Argument | Description |
+| --- | --- | --- |
+| `id` | `-u`, `-un`, `-gn` | Identifies the invoking account and obtains its primary group. |
+| `sudo` | `-v` | Prompts once for authorization and refreshes credentials before privileged operations. |
+| `getent` | `passwd` | Reads the target user's configured home directory from the account database. |
+| `apt-get` | `update` | Refreshes package metadata only when `curl` is absent. |
+|  | `install --yes curl` | Installs the HTTPS client needed for the initial and scheduled key refreshes. |
+| `install` | `-d`, `-m`, `-o`, `-g` | Creates managed directories and files with the required owner and permissions. |
+| `curl` | `--fail --location --proto '=https' --tlsv1.2` | Retrieves only successful HTTPS responses from the selected GitHub account's key endpoint. |
+| `ssh-keygen` | `-l -f` | Ensures downloaded data is parseable SSH public-key material before replacing access keys. |
+| `systemctl` | `daemon-reload`, `start`, `enable --now`, `reload` | Loads, runs, schedules, and safely reloads the service configuration. |
+| `sshd` | `-t` | Validates the complete SSH daemon configuration before it is reloaded. |
+| `cp` | `--archive` | Preserves the previous managed SSH drop-in for rollback after validation failure. |
+| `mv` | `-f` | Atomically replaces the authorized keys file and restores a previous SSH drop-in when needed. |
+
+</div>
+
+## References
+
+Debian's [OpenSSH server configuration manual](https://manpages.debian.org/trixie/openssh-server/sshd_config.5.en.html) documents `AuthenticationMethods`, SSH authentication controls, `Match` behavior, and Debian's `sshd_config.d` include path. Debian's [systemd timer manual](https://manpages.debian.org/trixie/systemd/systemd.timer.5.en.html) documents `OnCalendar` and `Persistent`. GitHub's [REST API documentation for public user SSH keys](https://docs.github.com/en/rest/users/keys#list-public-keys-for-a-user) documents public SSH-key retrieval for a username. Debian's [curl package page](https://packages.debian.org/trixie/curl) documents the installed HTTPS client.
