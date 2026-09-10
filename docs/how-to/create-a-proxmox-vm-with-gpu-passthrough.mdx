@@ -37,9 +37,9 @@ For the complete host preparation procedure, see Proxmox's [PCI(e) passthrough d
 
 2. On **OS**, select the guest installation ISO and the matching guest type and version. Select **Next**.
 
-3. On **System**, set **Machine** to **q35** and **BIOS** to **OVMF (UEFI)**. Keep **SCSI Controller** set to **VirtIO SCSI single** unless the guest has a specific requirement.
+3. On **System**, set **Machine** to **q35** and **BIOS** to **OVMF (UEFI)**. Enable **Add EFI Disk**, then clear **Pre-Enroll keys** to disable guest Secure Boot. Keep **SCSI Controller** set to **VirtIO SCSI single** unless the guest has a specific requirement.
 
-   q35 provides PCIe ports for the VM, and OVMF offers the best GPU passthrough compatibility when the GPU has a UEFI-capable ROM.
+   q35 provides PCIe ports for the VM, and OVMF offers the best GPU passthrough compatibility when the GPU has a UEFI-capable ROM. **Pre-Enroll keys** is selected in the screenshot below; clear that checkbox for a Linux guest that will load an NVIDIA DKMS driver without enrolling its Machine Owner Key (MOK).
 
    ![The System step configured with q35 and OVMF UEFI](./images/proxmox-create-vm-system.png)
 
@@ -53,9 +53,21 @@ For the complete host preparation procedure, see Proxmox's [PCI(e) passthrough d
 
 7. Select **Add**, then open **Options** for the VM. Set **Display** to **None** when the passed-through GPU is the primary display. Proxmox's noVNC and SPICE consoles cannot show the physical GPU's framebuffer.
 
-8. Start the VM and install the appropriate NVIDIA, AMD, or Intel guest driver. Verify the guest detects the GPU, then connect a monitor to the GPU or use a remote-desktop service in the guest if you need a graphical desktop.
+8. If the VM already has an EFI disk with **Pre-Enroll keys** enabled, stop the VM, select its **EFI Disk** in **Hardware**, and record any custom UEFI boot entries or recovery keys. Remove that EFI disk, then select **Add** > **EFI Disk** and leave **Pre-Enroll keys** cleared. Starting with a new EFI disk resets the VM's stored UEFI settings and Secure Boot keys.
+
+   On a Debian guest, confirm the result after booting:
+
+   ```bash
+   mokutil --sb-state
+   ```
+
+   The expected result is `SecureBoot disabled`. Do not disable Secure Boot when the guest requires it for its operating system, boot policy, or compliance requirements. In that case, enroll the DKMS MOK instead of following this step.
+
+9. Start the VM and install the appropriate NVIDIA, AMD, or Intel guest driver. Verify the guest detects the GPU, then connect a monitor to the GPU or use a remote-desktop service in the guest if you need a graphical desktop.
 
 ## See also
 
 - [Proxmox VE PCI(e) passthrough](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#qm_pci_passthrough)
 - [Proxmox VE system requirements](https://pve.proxmox.com/pve-docs/pve-admin-guide.html#_system_requirements)
+- [Proxmox VE Secure Boot setup](https://pve.proxmox.com/wiki/Secure_Boot_Setup)
+- [Debian Secure Boot and DKMS MOK enrollment](https://wiki.debian.org/SecureBoot#DKMS_and_Secure_Boot)

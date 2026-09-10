@@ -10,11 +10,11 @@ arch: x86_64
 
 ## What it does
 
-Installs Debian 13 (Trixie)'s proprietary NVIDIA driver and its DKMS kernel module on one x86_64 host. It verifies that it is running as root on Debian 13, adds `contrib`, `non-free`, and `non-free-firmware` to the standard Debian APT source file, refreshes APT metadata, installs headers for the running kernel, and installs `nvidia-kernel-dkms` and `nvidia-driver`.
+Installs Debian 13 (Trixie)'s proprietary NVIDIA driver and its DKMS kernel module on one x86_64 host. It verifies Debian 13, prompts for `sudo` access when needed, adds `contrib`, `non-free`, and `non-free-firmware` to the standard Debian APT source file, refreshes APT metadata, installs headers for the running kernel, and installs `nvidia-kernel-dkms` and `nvidia-driver`.
 
-The script modifies `/etc/apt/sources.list.d/debian.sources` and saves a same-directory `.bak` copy first. It does not configure CUDA, containers, X11 or Wayland, GPU passthrough, or Secure Boot key enrollment. Run it during a maintenance window: package installation can replace the kernel, and a reboot is required before the NVIDIA module can be loaded. On a Secure Boot-enabled system, complete the MOK enrollment prompted by DKMS before rebooting or the unsigned module will not load.
+The script modifies Debian's standard deb822 `/etc/apt/sources.list.d/debian.sources` file or, when present instead, the traditional `/etc/apt/sources.list` file. It saves a same-directory `.bak` copy first. It does not configure CUDA, containers, X11 or Wayland, GPU passthrough, or Secure Boot key enrollment. Run it during a maintenance window: package installation can replace the kernel, and a reboot is required before the NVIDIA module can be loaded. On a Secure Boot-enabled system, complete the MOK enrollment prompted by DKMS before rebooting or the unsigned module will not load.
 
-This uses the proprietary kernel-module flavor for broad support across the GPUs supported by Debian's packaged driver. It intentionally stops if the standard Debian 13 deb822 source file is absent rather than guessing how to modify a custom mirror or third-party source configuration.
+This uses the proprietary kernel-module flavor for broad support across the GPUs supported by Debian's packaged driver. Run it directly from an account with `sudo` access; it intentionally stops if the standard Debian 13 deb822 source file is absent rather than guessing how to modify a custom mirror or third-party source configuration.
 
 <SystemScript
   os="debian"
@@ -24,13 +24,26 @@ This uses the proprietary kernel-module flavor for broad support across the GPUs
 (
 set -euo pipefail
 
-sources_file='/etc/apt/sources.list.d/debian.sources'
-backup_file="\${sources_file}.nvidia-driver.bak"
+deb822_sources_file='/etc/apt/sources.list.d/debian.sources'
+one_line_sources_file='/etc/apt/sources.list'
+sources_file=''
+sources_format=''
 
 if [ "$(id -u)" -ne 0 ]; then
-  printf '%s\\n' 'Error: run this script as root.' >&2
-  exit 1
+  if ! command -v sudo >/dev/null 2>&1; then
+    printf '%s\\n' 'Error: sudo is required to install the NVIDIA driver.' >&2
+    exit 1
+  fi
+  sudo -v
 fi
+
+as_root() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
 
 if [ "$(uname -m)" != 'x86_64' ]; then
   printf '%s\\n' 'Error: this script supports x86_64 systems only.' >&2
@@ -48,20 +61,31 @@ if [ "\${ID:-}" != 'debian' ] || [ "\${VERSION_ID:-}" != '13' ]; then
   exit 1
 fi
 
-if [ ! -f "$sources_file" ] || ! grep -Eq '^Suites:.*(^|[[:space:]])trixie(-security|-updates)?([[:space:]]|$)' "$sources_file"; then
-  printf 'Error: expected Debian 13 deb822 sources in %s. Configure contrib, non-free, and non-free-firmware manually, then rerun.\\n' "$sources_file" >&2
+if [ -f "$deb822_sources_file" ] && as_root grep -Eq '^Suites:.*(^|[[:space:]])trixie(-security|-updates)?([[:space:]]|$)' "$deb822_sources_file"; then
+  sources_file="$deb822_sources_file"
+  sources_format='deb822'
+elif [ -f "$one_line_sources_file" ] && as_root grep -Eq '^[[:space:]]*deb([[:space:]]+\\[[^]]+\\])?[[:space:]]+[^[:space:]]+[[:space:]]+trixie(-security|-updates)?([[:space:]]|$)' "$one_line_sources_file"; then
+  sources_file="$one_line_sources_file"
+  sources_format='one-line'
+else
+  printf '%s\\n' 'Error: expected a standard Debian 13 source file in /etc/apt/sources.list.d/debian.sources or /etc/apt/sources.list. Configure contrib, non-free, and non-free-firmware manually, then rerun.' >&2
   exit 1
 fi
 
-cp --archive "$sources_file" "$backup_file"
+backup_file="\${sources_file}.nvidia-driver.bak"
+as_root cp --archive "$sources_file" "$backup_file"
 
 for component in contrib non-free non-free-firmware; do
-  sed -i -E '/^Components:/ { /(^|[[:space:]])'"$component"'([[:space:]]|$)/! s/$/ '"$component"'/ }' "$sources_file"
+  if [ "$sources_format" = 'deb822' ]; then
+    as_root sed -i -E '/^Components:/ { /(^|[[:space:]])'"$component"'([[:space:]]|$)/! s/$/ '"$component"'/ }' "$sources_file"
+  else
+    as_root sed -i -E '/^[[:space:]]*deb([[:space:]]+\\[[^]]+\\])?[[:space:]]+[^[:space:]]+[[:space:]]+trixie(-security|-updates)?([[:space:]]|$)/ { /(^|[[:space:]])'"$component"'([[:space:]]|$)/! s/$/ '"$component"'/ }' "$sources_file"
+  fi
 done
 
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install --yes "linux-headers-$(uname -r)" nvidia-kernel-dkms nvidia-driver
+as_root apt-get update
+as_root apt-get install --yes "linux-headers-$(uname -r)" nvidia-kernel-dkms nvidia-driver
 
 printf '%s\\n' 'NVIDIA driver packages are installed. Reboot the host, then run nvidia-smi to verify the driver.'
 )
@@ -70,9 +94,9 @@ printf '%s\\n' 'NVIDIA driver packages are installed. Reboot the host, then run 
 
 ## How it works
 
-The driver is distributed by Debian as the `nvidia-driver` metapackage in the `non-free` component. Its DKMS kernel-module package builds a module for the installed kernel, so the script first installs the headers matching `uname -r`. It does not use NVIDIA's standalone installer, which is outside Debian's package management and can complicate kernel upgrades.
+The driver is distributed by Debian as the `nvidia-driver` metapackage in the `non-free` component. Its DKMS kernel-module package builds a module for the installed kernel, so the script first installs the headers matching `uname -r`. The script validates sudo credentials once, then runs only the source-file and package-management commands with elevated privileges. It does not use NVIDIA's standalone installer, which is outside Debian's package management and can complicate kernel upgrades.
 
-Debian's NVIDIA guidance requires `contrib`, `non-free`, and `non-free-firmware` for Trixie sources. The script accepts the default deb822 source file only, makes an archive-preserving backup beside it, and adds each required component only when missing. It then uses `apt-get` to refresh available packages and install the driver stack. The `.bak` extension keeps the backup from being read as an APT source.
+Debian's NVIDIA guidance requires `contrib`, `non-free`, and `non-free-firmware` for Trixie sources. The script supports Debian 13's default deb822 source file and the traditional one-line `/etc/apt/sources.list` layout, makes an archive-preserving backup beside the selected file, and adds each required component only when missing. It intentionally does not edit arbitrary source fragments in `sources.list.d`. It then uses `apt-get` to refresh available packages and install the driver stack. The `.bak` extension keeps the backup from being read as an APT source.
 
 DKMS may prompt for a Machine Owner Key (MOK) password when Secure Boot is enabled. This is expected; enroll that key in the firmware screen on the next boot. Reboot after a successful installation, then use `nvidia-smi` to confirm that the loaded module and userspace tools can communicate with the GPU. Debian's packaged Trixie driver does not support every NVIDIA GPU generation; review the NVIDIA Graphics Drivers guidance before using it with older hardware or an RTX 50-series (Blackwell) GPU.
 
@@ -82,13 +106,14 @@ DKMS may prompt for a Machine Owner Key (MOK) password when Secure Boot is enabl
 
 | Command | Argument | Description |
 | --- | --- | --- |
-| `id` | `-u` | Verifies that the effective user is root. |
+| `id` | `-u` | Determines whether a command needs sudo elevation. |
+| `sudo` | `-v` | Prompts once for authorization and refreshes credentials before privileged operations. |
 | `uname` | `-m` | Confirms the machine is x86_64. |
 |  | `-r` | Supplies the running kernel release used to select matching headers. |
-| `grep` | `-E` | Checks that the standard source file targets a Trixie suite and that required APT components are present. |
+| `grep` | `-E` | Finds a standard deb822 or one-line Debian source file targeting a Trixie suite. |
 |  | `-q` | Performs those checks without printing matching text. |
 | `cp` | `--archive` | Preserves a metadata-aware backup of the APT source file before it is changed. |
-| `sed` | `-i` | Adds missing repository components directly to `Components:` fields. |
+| `sed` | `-i` | Adds missing repository components to deb822 `Components:` fields or matching one-line `deb` entries. |
 | `apt-get` | `update` | Refreshes local package metadata after the source components change. |
 |  | `install --yes` | Installs noninteractively after APT resolves the driver, DKMS, and header dependencies. |
 |  | `linux-headers-$(uname -r)` | Installs headers for the currently running kernel so DKMS can build its NVIDIA module. |
