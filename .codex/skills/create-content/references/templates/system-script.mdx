@@ -25,15 +25,7 @@ arch: <x86_64 or arm64>
       required: true,
     },
   ]}
-  script={`#!/usr/bin/env bash
-(
-set -euo pipefail
-
-parameter_name='{{parameter_name}}'
-
-<researched script body>
-)
-`}
+  scriptUrl="/scripts/<platform>-<version>-<architecture>/<script-name>.sh"
 />
 
 ## How it works

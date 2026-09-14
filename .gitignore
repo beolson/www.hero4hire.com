@@ -4,6 +4,7 @@ out/
 site/node_modules/
 site/.next/
 site/out/
+site/public/scripts/
 site/.source/
 site/tsconfig.tsbuildinfo
 .env*

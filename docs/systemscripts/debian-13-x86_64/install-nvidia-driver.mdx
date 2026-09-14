@@ -16,56 +16,13 @@ The script modifies `/etc/apt/sources.list.d/debian.sources` and saves a same-di
 
 This uses the proprietary kernel-module flavor for broad support across the GPUs supported by Debian's packaged driver. It intentionally stops if the standard Debian 13 deb822 source file is absent rather than guessing how to modify a custom mirror or third-party source configuration.
 
+After its first successful run, the script records version `1.0.0` in `/var/lib/hero4hire/system-scripts/debian-13-x86_64-install-nvidia-driver.version`. Later runs stop before changing the host, including when a newer downloaded script has a different version. Remove that marker only after reviewing the installed driver, source configuration, and script changes; it is not a routine retry mechanism.
+
 <SystemScript
   os="debian"
   version="13"
   arch="x86_64"
-  script={`#!/usr/bin/env bash
-(
-set -euo pipefail
-
-sources_file='/etc/apt/sources.list.d/debian.sources'
-backup_file="\${sources_file}.nvidia-driver.bak"
-
-if [ "$(id -u)" -ne 0 ]; then
-  printf '%s\\n' 'Error: run this script as root.' >&2
-  exit 1
-fi
-
-if [ "$(uname -m)" != 'x86_64' ]; then
-  printf '%s\\n' 'Error: this script supports x86_64 systems only.' >&2
-  exit 1
-fi
-
-if [ ! -r /etc/os-release ]; then
-  printf '%s\\n' 'Error: /etc/os-release is required to identify Debian 13.' >&2
-  exit 1
-fi
-
-. /etc/os-release
-if [ "\${ID:-}" != 'debian' ] || [ "\${VERSION_ID:-}" != '13' ]; then
-  printf '%s\\n' 'Error: this script supports Debian 13 (Trixie) only.' >&2
-  exit 1
-fi
-
-if [ ! -f "$sources_file" ] || ! grep -Eq '^Suites:.*(^|[[:space:]])trixie(-security|-updates)?([[:space:]]|$)' "$sources_file"; then
-  printf 'Error: expected Debian 13 deb822 sources in %s. Configure contrib, non-free, and non-free-firmware manually, then rerun.\\n' "$sources_file" >&2
-  exit 1
-fi
-
-cp --archive "$sources_file" "$backup_file"
-
-for component in contrib non-free non-free-firmware; do
-  sed -i -E '/^Components:/ { /(^|[[:space:]])'"$component"'([[:space:]]|$)/! s/$/ '"$component"'/ }' "$sources_file"
-done
-
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install --yes "linux-headers-$(uname -r)" nvidia-kernel-dkms nvidia-driver
-
-printf '%s\\n' 'NVIDIA driver packages are installed. Reboot the host, then run nvidia-smi to verify the driver.'
-)
-`}
+  scriptUrl="/scripts/debian-13-x86_64/install-nvidia-driver.sh"
 />
 
 ## How it works
@@ -75,6 +32,8 @@ The driver is distributed by Debian as the `nvidia-driver` metapackage in the `n
 Debian's NVIDIA guidance requires `contrib`, `non-free`, and `non-free-firmware` for Trixie sources. The script accepts the default deb822 source file only, makes an archive-preserving backup beside it, and adds each required component only when missing. It then uses `apt-get` to refresh available packages and install the driver stack. The `.bak` extension keeps the backup from being read as an APT source.
 
 DKMS may prompt for a Machine Owner Key (MOK) password when Secure Boot is enabled. This is expected; enroll that key in the firmware screen on the next boot. Reboot after a successful installation, then use `nvidia-smi` to confirm that the loaded module and userspace tools can communicate with the GPU. Debian's packaged Trixie driver does not support every NVIDIA GPU generation; review the NVIDIA Graphics Drivers guidance before using it with older hardware or an RTX 50-series (Blackwell) GPU.
+
+The completion marker is written only after the package installation succeeds. It stores the script version for auditability, but it intentionally blocks both matching and newer versions so a revised script cannot silently repeat host-level driver changes. A failed run creates no marker and can be corrected and retried.
 
 ### Commands Used
 
@@ -88,6 +47,9 @@ DKMS may prompt for a Machine Owner Key (MOK) password when Secure Boot is enabl
 | `grep` | `-E` | Checks that the standard source file targets a Trixie suite and that required APT components are present. |
 |  | `-q` | Performs those checks without printing matching text. |
 | `cp` | `--archive` | Preserves a metadata-aware backup of the APT source file before it is changed. |
+| `cat` |  | Reads a prior completion-marker version when preventing a repeat run. |
+| `install` | `-d -m 0755` | Creates the root-owned Hero4Hire marker directory after a successful installation. |
+|  | `-m 0644 /dev/stdin` | Writes the completed script version marker. |
 | `sed` | `-i` | Adds missing repository components directly to `Components:` fields. |
 | `apt-get` | `update` | Refreshes local package metadata after the source components change. |
 |  | `install --yes` | Installs noninteractively after APT resolves the driver, DKMS, and header dependencies. |

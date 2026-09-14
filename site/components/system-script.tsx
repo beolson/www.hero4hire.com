@@ -19,7 +19,7 @@ type SystemScriptProps = {
   version: string;
   arch: string;
   parameters?: SystemScriptParameter[];
-  script: string;
+  scriptUrl: string;
 };
 
 function substituteParameters(script: string, values: Record<string, string>) {
@@ -28,6 +28,32 @@ function substituteParameters(script: string, values: Record<string, string>) {
       ? values[name].replaceAll("'", "'\"'\"'")
       : token,
   );
+}
+
+function formatParameterFlag(name: string) {
+  return `--${name.replaceAll("_", "-")}`;
+}
+
+function quoteShellArgument(value: string) {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function createDownloadCommand(
+  origin: string,
+  scriptUrl: string,
+  parameters: SystemScriptParameter[],
+  values: Record<string, string>,
+) {
+  const argumentsToPass = parameters.flatMap((parameter) => {
+    if (parameter.type === "password") return [];
+
+    const value = values[parameter.name] ?? "";
+    return value
+      ? [formatParameterFlag(parameter.name), quoteShellArgument(value)]
+      : [];
+  });
+
+  return `curl -fsSL ${origin}${scriptUrl} | bash -s --${argumentsToPass.length ? ` ${argumentsToPass.join(" ")}` : ""}`;
 }
 
 function formatLabel(value: string | undefined) {
@@ -62,7 +88,7 @@ export function SystemScript({
   version,
   arch,
   parameters = [],
-  script,
+  scriptUrl,
 }: SystemScriptProps) {
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(
@@ -71,13 +97,27 @@ export function SystemScript({
   );
   const inputs = useRef<Record<string, HTMLInputElement | null>>({});
   const [copied, setCopied] = useState(false);
+  const [copiedDownload, setCopiedDownload] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
-  const renderedScript = useMemo(
-    () => substituteParameters(script, values),
-    [script, values],
+  const [script, setScript] = useState<string>();
+  const [scriptError, setScriptError] = useState(false);
+  const [origin, setOrigin] = useState("https://hero4hire.com");
+  const renderedScript = useMemo(() => {
+    if (!script) return "";
+    return substituteParameters(script, values);
+  }, [script, values]);
+  const downloadCommand = useMemo(
+    () => createDownloadCommand(origin, scriptUrl, parameters, values),
+    [origin, parameters, scriptUrl, values],
   );
-  const canCopy = parameters.every(
+  const canCopyScript = parameters.every(
     (parameter) => !parameter.required || values[parameter.name]?.trim(),
+  );
+  const canCopyDownload = parameters.every(
+    (parameter) =>
+      parameter.type === "password" ||
+      !parameter.required ||
+      values[parameter.name]?.trim(),
   );
 
   useEffect(() => {
@@ -101,28 +141,84 @@ export function SystemScript({
     };
   }, [parameters]);
 
-  async function copyScript() {
-    const currentValues = Object.fromEntries(
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadScript() {
+      setScript(undefined);
+      setScriptError(false);
+
+      try {
+        const response = await fetch(scriptUrl, { signal: controller.signal });
+        if (!response.ok) throw new Error("Unable to load script");
+        setScript(await response.text());
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError")
+          return;
+        setScriptError(true);
+      }
+    }
+
+    void loadScript();
+    return () => controller.abort();
+  }, [scriptUrl]);
+
+  function getCurrentValues() {
+    return Object.fromEntries(
       parameters.map((parameter) => [
         parameter.name,
         inputs.current[parameter.name]?.value ?? values[parameter.name] ?? "",
       ]),
     );
-    const missing = parameters.find(
-      (parameter) =>
-        parameter.required && !currentValues[parameter.name]?.trim(),
-    );
+  }
 
-    if (missing) {
-      inputs.current[missing.name]?.focus();
-      return;
-    }
+  function focusMissingRequiredValue(
+    currentValues: Record<string, string>,
+    allowPasswordPrompt = false,
+  ) {
+    const missing = parameters.find((parameter) => {
+      const isPasswordPrompt =
+        allowPasswordPrompt && parameter.type === "password";
+      return (
+        !isPasswordPrompt &&
+        parameter.required &&
+        !currentValues[parameter.name]?.trim()
+      );
+    });
+
+    if (missing) inputs.current[missing.name]?.focus();
+    return missing;
+  }
+
+  async function copyScript() {
+    const currentValues = getCurrentValues();
+    if (focusMissingRequiredValue(currentValues) || !script) return;
 
     try {
       await copyText(substituteParameters(script, currentValues));
       setCopyFailed(false);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2_000);
+    } catch {
+      setCopyFailed(true);
+    }
+  }
+
+  async function copyDownloadCommand() {
+    const currentValues = getCurrentValues();
+    if (focusMissingRequiredValue(currentValues, true)) return;
+
+    try {
+      await copyText(
+        createDownloadCommand(origin, scriptUrl, parameters, currentValues),
+      );
+      setCopyFailed(false);
+      setCopiedDownload(true);
+      window.setTimeout(() => setCopiedDownload(false), 2_000);
     } catch {
       setCopyFailed(true);
     }
@@ -137,71 +233,105 @@ export function SystemScript({
           {arch || "Not specified"}
         </span>
       </p>
+      {parameters.length > 0 ? (
+        <div className="space-y-3">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {parameters.map((parameter) => (
+              <label
+                className="grid gap-1.5"
+                htmlFor={`system-script-${parameter.name}`}
+                key={parameter.name}
+              >
+                <span className="text-sm font-medium">{parameter.label}</span>
+                {parameter.required ? (
+                  <span className="text-xs text-destructive">Required</span>
+                ) : null}
+                <Input
+                  defaultValue={parameter.default}
+                  id={`system-script-${parameter.name}`}
+                  onInput={(event) => {
+                    const value = event.currentTarget.value;
+                    setValues((current) => ({
+                      ...current,
+                      [parameter.name]: value,
+                    }));
+                  }}
+                  ref={(element) => {
+                    inputs.current[parameter.name] = element;
+                  }}
+                  required={parameter.required}
+                  type={parameter.type ?? "text"}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {parameter.description}
+                </span>
+              </label>
+            ))}
+          </div>
+          {parameters.some((parameter) => parameter.type === "password") ? (
+            <p className="text-xs text-muted-foreground">
+              Download commands omit password values and prompt securely when
+              run.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="grid gap-3 rounded-xl border bg-card p-6 text-card-foreground shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm font-medium">Download command</span>
+          <Button
+            disabled={!canCopyDownload}
+            onClick={copyDownloadCommand}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {copiedDownload ? (
+              <Check className="size-4" />
+            ) : (
+              <Copy className="size-4" />
+            )}
+            {copiedDownload
+              ? "Copied"
+              : copyFailed
+                ? "Copy failed"
+                : "Copy command"}
+          </Button>
+        </div>
+        <pre className="overflow-auto rounded-lg border bg-muted p-4 text-sm">
+          <code>{downloadCommand}</code>
+        </pre>
+      </div>
       <details className="overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm">
         <summary className="cursor-pointer px-6 py-4 text-sm font-medium marker:text-muted-foreground">
           Show script
         </summary>
-        <div className="space-y-6 border-t p-6">
-          {parameters.length > 0 ? (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {parameters.map((parameter) => (
-                <label
-                  className="grid gap-1.5"
-                  htmlFor={`system-script-${parameter.name}`}
-                  key={parameter.name}
-                >
-                  <span className="text-sm font-medium">{parameter.label}</span>
-                  {parameter.required ? (
-                    <span className="text-xs text-destructive">Required</span>
-                  ) : null}
-                  <Input
-                    defaultValue={parameter.default}
-                    id={`system-script-${parameter.name}`}
-                    onInput={(event) => {
-                      const value = event.currentTarget.value;
-                      setValues((current) => ({
-                        ...current,
-                        [parameter.name]: value,
-                      }));
-                    }}
-                    ref={(element) => {
-                      inputs.current[parameter.name] = element;
-                    }}
-                    required={parameter.required}
-                    type={parameter.type ?? "text"}
-                  />
-                  <span className="text-xs text-muted-foreground">
-                    {parameter.description}
-                  </span>
-                </label>
-              ))}
-            </div>
-          ) : null}
-          <div className="grid gap-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm font-medium">Script</span>
-              <Button
-                disabled={!canCopy}
-                onClick={copyScript}
-                size="sm"
-                type="button"
-              >
-                {copied ? (
-                  <Check className="size-4" />
-                ) : (
-                  <Copy className="size-4" />
-                )}
-                {copied
-                  ? "Copied"
-                  : copyFailed
-                    ? "Copy failed"
-                    : "Copy script"}
-              </Button>
-            </div>
-            <pre className="max-h-96 overflow-auto rounded-lg border bg-muted p-4 text-sm">
-              <code>{renderedScript}</code>
-            </pre>
+        <div className="grid gap-3 border-t p-6">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium">Script</span>
+            <Button
+              disabled={!canCopyScript || !script}
+              onClick={copyScript}
+              size="sm"
+              type="button"
+            >
+              {copied ? (
+                <Check className="size-4" />
+              ) : (
+                <Copy className="size-4" />
+              )}
+              {copied ? "Copied" : copyFailed ? "Copy failed" : "Copy script"}
+            </Button>
           </div>
+          <pre className="max-h-96 overflow-auto rounded-lg border bg-muted p-4 text-sm">
+            <code>
+              {scriptError
+                ? "Unable to load the script. Refresh the page and try again."
+                : script
+                  ? renderedScript
+                  : "Loading script…"}
+            </code>
+          </pre>
         </div>
       </details>
     </div>
