@@ -16,6 +16,8 @@ Run it as `root` on the node that physically contains the device. It changes onl
 
 Before running the script, enable **IOMMU** in the server firmware: **SVM/AMD-V** and **IOMMU** on AMD systems, or **Intel Virtualization Technology** and **VT-d** on Intel systems. For GPUs, enable **Above 4G Decoding** when the firmware offers it. The script cannot change firmware settings; it verifies their effective result by requiring active Linux IOMMU groups.
 
+After its first successful run, the script records version `1.0.0` in `/var/lib/hero4hire/system-scripts/proxmox-9.2-x86_64-enable-pci-passthrough.version`. Later runs stop before changing the node, including when a newer downloaded script has a different version. Remove that marker only after reviewing the existing boot and VFIO configuration; it is not a routine retry mechanism.
+
 <SystemScript
   os="proxmox-ve"
   version="9.2"
@@ -31,6 +33,8 @@ The script first sets a standard administrative `PATH`, since Proxmox boot tools
 
 This detects multi-function GPU hardware automatically. For example, on the inspected `pve-01`, it finds the RTX 3060 graphics function `01:00.0` and its audio controller `01:00.1`; their IOMMU group contains exactly those two functions. It also means an NVIDIA NIC, USB controller, or other NVIDIA hardware would be configured if present. After reboot, use the Proxmox UI's **Hardware → Add → PCI Device**, or `qm set`, to assign the verified device(s) to a stopped VM. PCI devices are node-local and prevent normal VM migration unless equivalent hardware and a Proxmox resource mapping are configured on destination nodes.
 
+The completion marker is written only after the boot configuration and initramfs update succeed. It stores the script version for auditability, but intentionally blocks matching and newer versions so a revised script cannot silently repeat node-level hardware changes. A failed run creates no marker and can be corrected and retried.
+
 ### Commands Used
 
 <div className="command-reference-table">
@@ -41,6 +45,9 @@ This detects multi-function GPU hardware automatically. For example, on the insp
 | `lspci` | `-Dnnd 10de:` | Discovers every NVIDIA PCI function by its vendor ID. |
 |  | `-nnk -s ADDRESS` | Lists a discovered PCI function, numeric IDs, and the driver in use; use it after reboot to confirm `vfio-pci`. |
 | `find` | `/sys/kernel/iommu_groups` | Checks for active IOMMU groups and can show the devices sharing a group. |
+| `cat` |  | Reads a prior completion-marker version when preventing a repeat run. |
+| `install` | `-d -m 0755` | Creates the root-owned Hero4Hire marker directory after successful configuration. |
+|  | `-m 0644 /dev/stdin` | Writes the completed script version marker. |
 | `update-grub` |  | Regenerates GRUB's configuration when the node boots through GRUB. |
 | `proxmox-boot-tool` | `refresh` | Refreshes boot entries after changing `/etc/kernel/cmdline` on proxmox-boot-tool installations. |
 | `update-initramfs` | `-u -k all` | Rebuilds initramfs images for all installed kernels so VFIO claims the chosen IDs early in boot. |

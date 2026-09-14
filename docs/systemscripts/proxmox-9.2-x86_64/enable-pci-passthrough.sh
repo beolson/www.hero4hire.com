@@ -5,6 +5,10 @@ set -euo pipefail
 # Proxmox administrative tools are commonly installed in /usr/sbin, which
 # may be absent from PATH in an SSH root shell or automation environment.
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+script_id='proxmox-9.2-x86_64-enable-pci-passthrough'
+script_version='1.0.0'
+marker_directory='/var/lib/hero4hire/system-scripts'
+marker_file="$marker_directory/$script_id.version"
 
 fail() {
   printf 'Error: %s\n' "$*" >&2
@@ -45,6 +49,11 @@ esac
 
 if [ ! -d /sys/kernel/iommu_groups ] || ! find /sys/kernel/iommu_groups -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .; then
   fail "$firmware_setting is not active: Linux exposes no IOMMU groups. Enable the firmware setting, reboot, and try again."
+fi
+
+if [ -e "$marker_file" ]; then
+  completed_version=$(cat "$marker_file")
+  fail "$script_id already completed at version ${completed_version:-unknown} (current version: $script_version). Review the host state before deliberately removing $marker_file."
 fi
 
 pci_ids=()
@@ -94,6 +103,9 @@ else
 fi
 
 update-initramfs -u -k all
+
+install -d -m 0755 "$marker_directory"
+printf '%s\n' "$script_version" | install -m 0644 /dev/stdin "$marker_file"
 
 printf 'Configured VFIO for: %s\n' "${selected_devices[*]}"
 printf '%s\n' 'Reboot this node before assigning the devices to a VM.'

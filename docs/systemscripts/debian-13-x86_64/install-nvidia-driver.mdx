@@ -16,6 +16,8 @@ The script modifies `/etc/apt/sources.list.d/debian.sources` and saves a same-di
 
 This uses the proprietary kernel-module flavor for broad support across the GPUs supported by Debian's packaged driver. It intentionally stops if the standard Debian 13 deb822 source file is absent rather than guessing how to modify a custom mirror or third-party source configuration.
 
+After its first successful run, the script records version `1.0.0` in `/var/lib/hero4hire/system-scripts/debian-13-x86_64-install-nvidia-driver.version`. Later runs stop before changing the host, including when a newer downloaded script has a different version. Remove that marker only after reviewing the installed driver, source configuration, and script changes; it is not a routine retry mechanism.
+
 <SystemScript
   os="debian"
   version="13"
@@ -31,6 +33,8 @@ Debian's NVIDIA guidance requires `contrib`, `non-free`, and `non-free-firmware`
 
 DKMS may prompt for a Machine Owner Key (MOK) password when Secure Boot is enabled. This is expected; enroll that key in the firmware screen on the next boot. Reboot after a successful installation, then use `nvidia-smi` to confirm that the loaded module and userspace tools can communicate with the GPU. Debian's packaged Trixie driver does not support every NVIDIA GPU generation; review the NVIDIA Graphics Drivers guidance before using it with older hardware or an RTX 50-series (Blackwell) GPU.
 
+The completion marker is written only after the package installation succeeds. It stores the script version for auditability, but it intentionally blocks both matching and newer versions so a revised script cannot silently repeat host-level driver changes. A failed run creates no marker and can be corrected and retried.
+
 ### Commands Used
 
 <div className="command-reference-table">
@@ -43,6 +47,9 @@ DKMS may prompt for a Machine Owner Key (MOK) password when Secure Boot is enabl
 | `grep` | `-E` | Checks that the standard source file targets a Trixie suite and that required APT components are present. |
 |  | `-q` | Performs those checks without printing matching text. |
 | `cp` | `--archive` | Preserves a metadata-aware backup of the APT source file before it is changed. |
+| `cat` |  | Reads a prior completion-marker version when preventing a repeat run. |
+| `install` | `-d -m 0755` | Creates the root-owned Hero4Hire marker directory after a successful installation. |
+|  | `-m 0644 /dev/stdin` | Writes the completed script version marker. |
 | `sed` | `-i` | Adds missing repository components directly to `Components:` fields. |
 | `apt-get` | `update` | Refreshes local package metadata after the source components change. |
 |  | `install --yes` | Installs noninteractively after APT resolves the driver, DKMS, and header dependencies. |
