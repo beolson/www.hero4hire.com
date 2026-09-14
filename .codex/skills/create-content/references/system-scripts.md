@@ -14,7 +14,8 @@ Create a System Script document only after understanding the requested platform 
 - Inspect `site/source.config.ts` and the closest existing page before writing. The current System Script schema requires `type: system-script`, an allowed `os`, `version`, and `arch`.
 - Add the page beneath `docs/systemscripts/<platform>-<version>-<arch>/`, create or update that directory's `meta.json`, and update `docs/systemscripts/meta.json` when introducing a platform directory.
 - If the requested platform is not accepted by the schema, extend the schema narrowly for that platform rather than mislabeling the page.
-- Reuse `<SystemScript>` for parameterized scripts. Form field names must match `{{placeholder}}` names in the script. Wrap placeholder assignments in single quotes so the component's shell escaping remains effective. Use `type: "password"` for password inputs.
+- Store each script beside its MDX page at `docs/systemscripts/<platform>-<version>-<arch>/<script-name>.sh` and pass its root-relative published path to `<SystemScript scriptUrl="/scripts/<platform>-<version>-<arch>/<script-name>.sh" />`. The asset is the source of truth; MDX must not embed the script. `bun dev` and `bun build` copy the assets to `site/public/scripts/` before Next.js serves or exports them.
+- Reuse `<SystemScript>` for parameterized scripts. Form field names must match `{{placeholder}}` names in the script. Wrap placeholder assignments in single quotes so the component's shell escaping remains effective. Scripts with parameters must accept their kebab-case `--parameter-name` flags; password parameters must prompt when omitted so download commands never include secrets. Use `type: "password"` for password inputs.
 
 ## Document requirements
 
