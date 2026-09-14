@@ -24,7 +24,7 @@ for command in lspci update-initramfs; do
 done
 
 command -v pveversion >/dev/null 2>&1 || fail 'pveversion was not found; this must run on Proxmox VE.'
-if ! pveversion | grep -q '^pve-manager/9\\.'; then
+if ! pveversion | grep -q '^pve-manager/9\.'; then
   fail 'this script is for Proxmox VE 9.x.'
 fi
 
