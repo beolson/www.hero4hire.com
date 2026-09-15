@@ -53,7 +53,7 @@ function createDownloadCommand(
       : [];
   });
 
-  return `curl -fsSL ${origin}${scriptUrl} | bash -s --${argumentsToPass.length ? ` ${argumentsToPass.join(" ")}` : ""}`;
+  return `bash <(curl -fsSL ${origin}${scriptUrl})${argumentsToPass.length ? ` ${argumentsToPass.join(" ")}` : ""}`;
 }
 
 function formatLabel(value: string | undefined) {
