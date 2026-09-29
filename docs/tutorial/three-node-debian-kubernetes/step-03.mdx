@@ -1,0 +1,78 @@
+---
+title: "Step 3: Create the three-server K3s control plane"
+description: Build an embedded-etcd K3s control plane with three Debian servers and verify quorum plus snapshot recovery inputs.
+type: tutorial
+---
+
+# Step 3: Create the three-server K3s control plane
+
+This step should take approximately 30 to 40 minutes.
+
+## Overview
+
+Three K3s server nodes provide an odd-numbered embedded-etcd quorum. The control plane can tolerate one unavailable server; it does not make your single-replica data services highly available.
+
+## Before you start
+
+- Complete Steps 1 and 2 on all nodes.
+- Choose a long random K3s token and store it in your password manager, not shell history.
+- Use `192.168.50.10` only if it is a real, stable registration address such as a router VIP or TCP load balancer. Otherwise use `lab-01` initially and plan a registration VIP later.
+
+## Practice the skill
+
+1. Create identical baseline configuration on each server. K3s requires critical server settings to match; `/etc/rancher/k3s/config.yaml` is the standard configuration location.
+
+   ```yaml
+   # /etc/rancher/k3s/config.yaml
+   write-kubeconfig-mode: "0640"
+   disable:
+     - servicelb
+     - traefik
+   tls-san:
+     - "192.168.50.10"
+   ```
+
+   Disabling the bundled ServiceLB and Traefik leaves the tutorial free to install MetalLB and separately scoped ingress through GitOps.
+
+2. Initialize `lab-01`. Export the token only for the command; do not paste it into a repository.
+
+   ```bash
+   curl -sfL https://get.k3s.io | \
+     K3S_TOKEN='replace-with-a-random-secret' sh -s - server --cluster-init
+   sudo kubectl get nodes
+   ```
+
+3. Join `lab-02` and `lab-03` as servers. Use the same token and the same configuration file on each node.
+
+   ```bash
+   curl -sfL https://get.k3s.io | \
+     K3S_TOKEN='replace-with-the-same-random-secret' sh -s - server \
+     --server https://lab-01:6443
+   ```
+
+4. Verify all nodes and etcd membership from `lab-01`.
+
+   ```bash
+   sudo kubectl get nodes -o wide
+   sudo k3s etcd-snapshot ls
+   ```
+
+   Expect three `Ready` nodes. If a joining server reports a critical configuration mismatch, stop and make its configuration match before retrying; do not bypass the check.
+
+5. Copy the kubeconfig to your workstation securely, change only its server address to the stable registration address, and restrict file permissions.
+
+   ```bash
+   sudo cat /etc/rancher/k3s/k3s.yaml
+   ```
+
+6. Schedule an encrypted K3s etcd snapshot copy to SFTP. Back up both the snapshot and `/var/lib/rancher/k3s/server/token`: K3s uses that token to decrypt confidential data during restore. [K3s backup and restore](https://docs.k3s.io/datastore/backup-restore)
+
+## What you learned
+
+- Three embedded-etcd servers provide quorum, not application replicas.
+- Matching server configuration is an integrity requirement.
+- K3s snapshots and the server token are a recovery pair.
+
+## Continue learning
+
+Continue to [Step 4: Add local storage placement and LAN ingress](./step-04).

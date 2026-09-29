@@ -1,0 +1,60 @@
+---
+title: "Step 2: Harden access and establish node baselines"
+description: Restrict administrative access, enable unattended security updates, and verify the networking prerequisites shared by all K3s servers.
+type: tutorial
+---
+
+# Step 2: Harden access and establish node baselines
+
+This step should take approximately 30 to 40 minutes.
+
+## Overview
+
+You will make SSH key access, time, updates, and firewall policy predictable before Kubernetes introduces more moving parts. Keep a second SSH session open when changing SSH or firewall rules.
+
+## Practice the skill
+
+1. Install your administrator public key and test it in a second terminal.
+
+   ```bash
+   ssh-copy-id admin@lab-01
+   ssh admin@lab-01 'id && hostname'
+   ```
+
+   Repeat for each node. Only after key login works, edit `/etc/ssh/sshd_config.d/10-homelab.conf` to set `PasswordAuthentication no` and `PermitRootLogin no`, then validate and reload SSH:
+
+   ```bash
+   sudo sshd -t
+   sudo systemctl reload ssh
+   ```
+
+2. Enable automatic security updates, then document the maintenance window rather than assuming reboots never happen.
+
+   ```bash
+   sudo apt install --yes unattended-upgrades
+   sudo dpkg-reconfigure --priority=low unattended-upgrades
+   ```
+
+3. Enable only the firewall rules required for your management network and K3s. The exact ports depend on your CNI and chosen add-ons. Start from the [K3s networking requirements](https://docs.k3s.io/installation/requirements), restrict SSH to your management subnet, and permit the K3s server and pod-network traffic only between the three node addresses. Verify from another machine before making the firewall persistent.
+
+4. Confirm time and name resolution from every node.
+
+   ```bash
+   for host in lab-01 lab-02 lab-03; do
+     getent hosts "$host"
+     ping -c 1 "$host"
+   done
+   timedatectl status
+   ```
+
+5. Create a break-glass record outside the cluster: node addresses, console access method, encrypted SFTP key backup, K3s server token recovery location, and GitHub repository URL. Do not store the only copy in the cluster you may need to rebuild.
+
+## What you learned
+
+- Remote administration needs a verified recovery path before it is restricted.
+- Clock synchronization and stable internal DNS are functional Kubernetes dependencies.
+- Firewall policy belongs to the host boundary as well as Kubernetes NetworkPolicies.
+
+## Continue learning
+
+Continue to [Step 3: Create the three-server K3s control plane](./step-03).

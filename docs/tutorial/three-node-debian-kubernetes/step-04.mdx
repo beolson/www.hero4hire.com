@@ -1,0 +1,84 @@
+---
+title: "Step 4: Add local storage placement and LAN ingress"
+description: Reserve one node for durable single-instance services, install MetalLB, and establish an internal-only Traefik entry point.
+type: tutorial
+---
+
+# Step 4: Add local storage placement and LAN ingress
+
+This step should take approximately 30 to 40 minutes.
+
+## Overview
+
+Single-instance PostgreSQL and Garage need an intentional home. You will label `lab-01` as the storage node, then give LAN users an ingress address from MetalLB. Neither action creates high availability; both make failure and recovery behavior explicit.
+
+## Practice the skill
+
+1. Label the storage node and record that label in Git as a cluster invariant.
+
+   ```bash
+   kubectl label node lab-01 homelab.example/role=storage
+   kubectl get nodes --show-labels
+   ```
+
+   Every persistent single-instance workload later uses this node selector. Do not put the authoritative PostgreSQL or Garage volume on the GPU node.
+
+2. Create the GitOps directory shape before installing add-ons.
+
+   ```text
+   clusters/home/
+     infrastructure/{metallb,ingress,monitoring}/
+     services/{postgres,garage}/
+     apps/
+   ```
+
+   Commit manifests and Helm values; use SOPS-encrypted files for tokens and credentials. Step 5 connects Flux to this repository.
+
+3. Install MetalLB from its official chart through a version-pinned Flux `HelmRelease`. Then define an `IPAddressPool` and `L2Advertisement` in the same Git commit.
+
+   ```yaml
+   apiVersion: metallb.io/v1beta1
+   kind: IPAddressPool
+   metadata:
+     name: lan-services
+     namespace: metallb-system
+   spec:
+     addresses:
+       - 192.168.50.240-192.168.50.250
+   ---
+   apiVersion: metallb.io/v1beta1
+   kind: L2Advertisement
+   metadata:
+     name: lan-services
+     namespace: metallb-system
+   ```
+
+   MetalLB's Layer 2 mode announces a service IP from a cluster node onto your LAN. See the [MetalLB installation documentation](https://metallb.io/installation/).
+
+4. Deploy one Traefik release named `traefik-internal` with a `LoadBalancer` Service. Restrict it to the LAN pool and use a distinct `IngressClass`, `internal`.
+
+   ```yaml
+   spec:
+     ingressClass: internal
+     service:
+       spec:
+         type: LoadBalancer
+   ```
+
+5. Verify that MetalLB assigned an address, then route a test hostname from LAN DNS to it.
+
+   ```bash
+   kubectl get svc -A --watch
+   ```
+
+   Use a small `whoami` test application with an `IngressClassName: internal`. Confirm it resolves and responds on your LAN; it should have no Cloudflare DNS record or tunnel route.
+
+## What you learned
+
+- A node label expresses a scheduling contract.
+- A MetalLB address is LAN exposure, not Internet exposure.
+- Separate ingress classes make public/private intent reviewable in Git.
+
+## Continue learning
+
+Continue to [Step 5: Bootstrap GitHub GitOps and encrypted secrets](./step-05).

@@ -1,0 +1,71 @@
+---
+title: Three-node Kubernetes home lab on Debian 13
+description: Build a GitOps-operated home lab with private and public ingress, PostgreSQL, Garage S3 storage, GPU scheduling, observability, and SFTP recovery.
+type: tutorial
+---
+
+# Three-node Kubernetes home lab on Debian 13
+
+This series builds a small Kubernetes platform that is intentionally easy to reason about. Its control plane survives one node failure; PostgreSQL and object storage do not. Their safety comes from local durable disks, Git-declared configuration, and tested off-cluster SFTP restores.
+
+## What you will learn
+
+By the end of this series, you will be able to:
+
+- Operate a three-server K3s cluster on bare-metal Debian 13.
+- Deliver cluster and application changes from GitHub with Flux and SOPS-encrypted secrets.
+- Separate public Cloudflare-Tunnel routes from LAN-only ingress.
+- Run one shared PostgreSQL service and one Garage S3-compatible object service with a recoverable SFTP backup plan.
+- Schedule NVIDIA GPU workloads deliberately and observe the cluster, storage, backups, and GPU.
+
+## Who this is for
+
+This is for a home-lab operator comfortable with SSH, Git, Linux packages, IP addressing, and basic DNS. It assumes no prior Kubernetes administration. It does not teach multi-tenant security, Internet-facing Kubernetes API access, or database high availability.
+
+## Before you begin
+
+Prepare the following before Step 1:
+
+- Three x86_64 Debian 13 machines with static DHCP reservations or static addresses, reliable wired networking, and SSD/NVMe storage. One has a discrete NVIDIA GPU.
+- A fourth machine or remote service running SFTP, with enough capacity for retained backups. It must not be on the same disk, host, or power circuit as the cluster.
+- A GitHub account and a new private repository such as `homelab-gitops`.
+- A Cloudflare-managed domain for public sites. Internal-only services require no public DNS.
+- A LAN address range reserved for MetalLB that is outside DHCP, for example `192.168.50.240-192.168.50.250`.
+- A workstation with `ssh`, `git`, `kubectl`, `helm`, `flux`, `sops`, `age`, and `rclone`.
+
+Use the example names and replace values consistently:
+
+| Purpose | Example |
+| --- | --- |
+| Servers | `lab-01`, `lab-02`, `lab-03` |
+| API registration address | `192.168.50.10` |
+| Storage node | `lab-01` |
+| GPU node | `lab-03` |
+| Cluster domain | `cluster.example.net` |
+| GitHub repository | `github.com/EXAMPLE/homelab-gitops` |
+
+## Series steps
+
+Each focused session takes approximately 30 to 40 minutes.
+
+1. [Plan the cluster and prepare Debian hosts](./step-01)
+2. [Harden access and establish node baselines](./step-02)
+3. [Create the three-server K3s control plane](./step-03)
+4. [Add local storage placement and LAN ingress](./step-04)
+5. [Bootstrap GitHub GitOps and encrypted secrets](./step-05)
+6. [Expose only public applications through Cloudflare](./step-06)
+7. [Deploy shared PostgreSQL and prove it can be restored](./step-07)
+8. [Deploy Garage object storage and back up buckets](./step-08)
+9. [Make the NVIDIA GPU node available on purpose](./step-09)
+10. [Observe the platform and rehearse recovery](./step-10)
+
+Keep the [cheat sheet](./cheat-sheet) nearby once the platform is running.
+
+## Key resources
+
+- [K3s high-availability embedded etcd](https://docs.k3s.io/datastore/ha-embedded)
+- [Flux bootstrap](https://fluxcd.io/flux/installation/bootstrap/)
+- [Cloudflare Tunnel on Kubernetes](https://developers.cloudflare.com/tunnel/guides/kubernetes/)
+- [pgBackRest SFTP support](https://pgbackrest.org/user-guide.html)
+- [Garage source and documentation](https://github.com/deuxfleurs-org/garage)
+- [NVIDIA GPU Operator](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/)

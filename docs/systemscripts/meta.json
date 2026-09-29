@@ -1,6 +1,6 @@
 {
   "title": "System Scripts",
-  "defaultOpen": true,
+  "defaultOpen": false,
   "pages": [
     "debian-13-x86_64",
     "proxmox-9.2-x86_64"

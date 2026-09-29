@@ -54,6 +54,16 @@ export const howTos = defineDocs({
   meta: { schema: metaSchema },
 });
 
+const tutorialSchema = pageSchema.extend({
+  type: z.literal("tutorial"),
+});
+
+export const tutorials = defineDocs({
+  dir: "../docs/tutorial",
+  docs: { schema: tutorialSchema },
+  meta: { schema: metaSchema },
+});
+
 export const blogPosts = defineCollections({
   type: "doc",
   dir: "../blog",

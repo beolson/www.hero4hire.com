@@ -1,6 +1,6 @@
 {
   "title": "Debian 13 x86_64",
-  "defaultOpen": true,
+  "defaultOpen": false,
   "pages": [
     "install-nvidia-driver",
     "configure-github-ssh-access",

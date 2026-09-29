@@ -1,0 +1,70 @@
+---
+title: "Step 5: Bootstrap GitHub GitOps and encrypted secrets"
+description: Connect Flux to a GitHub repository and use SOPS with age so cluster configuration is reviewable without storing plaintext secrets.
+type: tutorial
+---
+
+# Step 5: Bootstrap GitHub GitOps and encrypted secrets
+
+This step should take approximately 30 to 40 minutes.
+
+## Overview
+
+Flux changes the deployment flow from "run this command against the cluster" to "review and merge this desired state." SOPS lets the same repository contain encrypted secret values without treating base64 as protection.
+
+## Practice the skill
+
+1. Create a private GitHub repository named `homelab-gitops`, clone it locally, and create the directory structure from Step 4. Protect `main` with pull-request review if you use the repository with others.
+
+2. Generate an age key on your secure workstation and store a recovery copy outside the cluster.
+
+   ```bash
+   age-keygen -o age.agekey
+   age-keygen -y age.agekey
+   ```
+
+   The private key is never committed. Put its public recipient in `.sops.yaml` and encrypt only Kubernetes `data` and `stringData` fields.
+
+3. Create the Flux decryption secret and bootstrap Flux to GitHub. Follow the current [Flux GitHub bootstrap instructions](https://fluxcd.io/flux/installation/bootstrap/github/) for your authentication method.
+
+   ```bash
+   kubectl -n flux-system create secret generic sops-age \
+     --from-file=age.agekey=./age.agekey
+   flux bootstrap github \
+     --owner=EXAMPLE \
+     --repository=homelab-gitops \
+     --branch=main \
+     --path=clusters/home
+   ```
+
+4. Add a `Kustomization` that enables SOPS decryption and reconciles infrastructure before services.
+
+   ```yaml
+   spec:
+     interval: 10m
+     path: ./clusters/home/infrastructure
+     prune: true
+     decryption:
+       provider: sops
+       secretRef:
+         name: sops-age
+   ```
+
+5. Prove the workflow with an encrypted example Secret and harmless ConfigMap. Commit, push, and watch Flux reconcile.
+
+   ```bash
+   flux get kustomizations
+   flux get helmreleases -A
+   ```
+
+6. Establish the image workflow for your own software: GitHub Actions builds a digest-addressed image, updates the GitOps repository in a pull request, and Flux applies the merged digest. Third-party charts are version pinned and upgraded in dedicated pull requests.
+
+## What you learned
+
+- Git is the audit trail and recovery source for cluster configuration.
+- The age private key is a recovery asset; lose it and encrypted Git secrets cannot be read.
+- Image tags are mutable; deploy immutable digests for software you build.
+
+## Continue learning
+
+Continue to [Step 6: Expose only public applications through Cloudflare](./step-06).
