@@ -1,0 +1,5 @@
+{
+  "title": "Tutorial",
+  "defaultOpen": false,
+  "pages": ["three-node-debian-kubernetes"]
+}

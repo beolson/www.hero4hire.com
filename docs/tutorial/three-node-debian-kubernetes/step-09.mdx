@@ -1,0 +1,71 @@
+---
+title: "Step 9: Make the NVIDIA GPU node available on purpose"
+description: Install the NVIDIA GPU Operator, reserve the GPU node for opt-in workloads, and verify GPU allocation plus metrics.
+type: tutorial
+---
+
+# Step 9: Make the NVIDIA GPU node available on purpose
+
+This step should take approximately 30 to 40 minutes.
+
+## Overview
+
+The GPU is a scarce device, not a general-purpose performance label. You will let the NVIDIA GPU Operator expose it as `nvidia.com/gpu`, then require workloads to opt in through both scheduling policy and a GPU limit.
+
+## Before you start
+
+- Confirm `lspci` shows the NVIDIA device on `lab-03`.
+- Check the current NVIDIA GPU Operator platform support for your GPU and Debian/kernel combination before choosing whether the Operator or the host manages the driver.
+- Do not install a competing device plugin.
+
+## Practice the skill
+
+1. Label and taint the GPU node. Keep normal applications off it unless they explicitly tolerate the taint.
+
+   ```bash
+   kubectl label node lab-03 homelab.example/gpu=nvidia
+   kubectl taint node lab-03 homelab.example/gpu=nvidia:NoSchedule
+   ```
+
+2. Install the NVIDIA GPU Operator as a pinned Flux Helm release. The Operator manages drivers, container toolkit, device plugin, GPU feature discovery, and DCGM monitoring components. [NVIDIA GPU Operator overview](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/)
+
+3. Wait for the Operator validation pods and confirm Kubernetes advertises a GPU.
+
+   ```bash
+   kubectl get pods -n gpu-operator
+   kubectl describe node lab-03 | rg 'nvidia.com/gpu'
+   ```
+
+4. Run a GPU test workload with an explicit node selector, matching toleration, CPU/memory limits, and one GPU limit.
+
+   ```yaml
+   spec:
+     nodeSelector:
+       homelab.example/gpu: nvidia
+     tolerations:
+       - key: homelab.example/gpu
+         operator: Equal
+         value: nvidia
+         effect: NoSchedule
+     containers:
+       - name: gpu-test
+         resources:
+           limits:
+             nvidia.com/gpu: 1
+             cpu: "2"
+             memory: 4Gi
+   ```
+
+5. Add DCGM exporter metrics to Prometheus. Alert on an unavailable GPU, excessive temperature, ECC errors where supported, and a device-plugin failure.
+
+6. Keep model weights as a cache on `lab-03`; store custom models, prompts, workflows, and generated durable artifacts in Garage so they enter the normal SFTP backup path.
+
+## What you learned
+
+- Kubernetes allocates GPUs as vendor device-plugin resources.
+- A taint, selector, and `nvidia.com/gpu` limit express different parts of the scheduling contract.
+- GPU workloads need storage and backup planning, not just accelerator access.
+
+## Continue learning
+
+Continue to [Step 10: Observe the platform and rehearse recovery](./step-10).

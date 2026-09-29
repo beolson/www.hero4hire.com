@@ -1,0 +1,49 @@
+---
+title: "Step 8: Deploy Garage object storage and back up buckets"
+description: Run Garage as a single-node, private S3-compatible service with per-application credentials and dated SFTP copies.
+type: tutorial
+---
+
+# Step 8: Deploy Garage object storage and back up buckets
+
+This step should take approximately 30 to 40 minutes.
+
+## Overview
+
+Garage is a lightweight S3-compatible object store designed for self-hosted deployments. Here it runs as one storage node with replication factor one: a node or disk loss requires a restore. This is a conscious simplification, not a Garage availability claim.
+
+## Before you start
+
+- Complete the PostgreSQL backup test. The same SFTP target must not be the only copy of its own credential.
+- Check each third-party application against Garage's [S3 compatibility documentation](https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/) before trusting it with primary data.
+
+## Practice the skill
+
+1. Deploy Garage from a version-pinned upstream image/chart through Flux. Use one replica, `replication_factor = 1`, a `ReadWriteOnce` PVC, and storage-node affinity. Keep the RPC and administration listeners private to the namespace; expose only the S3 API as a ClusterIP Service.
+
+2. Generate the Garage RPC secret and admin token once, encrypt them with SOPS, and retain an offline recovery copy. A replacement pod must use the same identity and data volume; losing only the PVC is a restore event.
+
+3. Create one bucket and one access key per application. Give keys only the permissions and buckets the application needs. Use path-style S3 endpoints unless an application requires virtual-hosted bucket names.
+
+4. Prove baseline compatibility with the AWS CLI from a disposable pod.
+
+   ```bash
+   aws --endpoint-url http://garage.garage.svc.cluster.local:3900 s3 mb s3://restore-proof
+   printf 'hello\n' > proof.txt
+   aws --endpoint-url http://garage.garage.svc.cluster.local:3900 s3 cp proof.txt s3://restore-proof/
+   aws --endpoint-url http://garage.garage.svc.cluster.local:3900 s3 ls s3://restore-proof/
+   ```
+
+5. Deploy an `rclone` CronJob with read-only object-store credentials and a restricted SFTP account. Copy objects to an immutable-looking dated prefix such as `garage/2026-09-15/`; do not use a blind mirror that immediately propagates accidental deletions.
+
+6. Restore a dated prefix into a temporary test bucket. Check object count and sample checksums, then delete the test bucket. Alert when the CronJob fails or no verified backup exists within your recovery-point target.
+
+## What you learned
+
+- S3 storage is an API boundary, not a shared filesystem mount.
+- Single-node Garage needs backups even though Garage can later scale to replicated nodes.
+- Logical S3 copies are portable to a different compatible service during recovery.
+
+## Continue learning
+
+Continue to [Step 9: Make the NVIDIA GPU node available on purpose](./step-09).

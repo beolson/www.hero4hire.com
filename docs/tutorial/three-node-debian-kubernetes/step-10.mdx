@@ -1,0 +1,51 @@
+---
+title: "Step 10: Observe the platform and rehearse recovery"
+description: Add metrics, logs, and actionable alerts, then prove GitOps, PostgreSQL, object, and control-plane recovery paths.
+type: tutorial
+---
+
+# Step 10: Observe the platform and rehearse recovery
+
+This step should take approximately 30 to 40 minutes.
+
+## Overview
+
+Observability should answer "what is broken?" and "can I recover?" before a failure is urgent. You will install metrics and logs through GitOps, then exercise recovery paths with safe, disposable targets.
+
+## Practice the skill
+
+1. Install a version-pinned `kube-prometheus-stack` release through Flux. Include kube-state-metrics, node exporter, Prometheus, Grafana, and Alertmanager. Keep Grafana internal-only or protect it with Cloudflare Access.
+
+2. Install Loki and Alloy for Kubernetes logs. Start with short retention sized to your local disk; logs are useful evidence but should not exhaust the storage node.
+
+3. Add ServiceMonitors or PodMonitors for PostgreSQL, Garage, `cloudflared`, Traefik, backup CronJobs, and DCGM exporter. Build a small dashboard before importing many community dashboards.
+
+4. Route Alertmanager notifications to a channel you will notice. Create alerts for:
+
+   - failed or overdue PostgreSQL and Garage backup jobs;
+   - missing PostgreSQL WAL archiving;
+   - PVC usage above 80 percent;
+   - Flux reconciliation failures;
+   - unavailable internal/public ingress and Cloudflare Tunnel connectors;
+   - GPU device-plugin failure or unsafe temperature.
+
+5. Rehearse four recovery actions and write actual timings in `docs/recovery-log.md`:
+
+   | Failure | Proof of recovery |
+   | --- | --- |
+   | Deleted application manifest | Revert Git commit; Flux restores it. |
+   | PostgreSQL data loss | Restore a separate namespace to a chosen point in time. |
+   | Object deletion | Restore a dated SFTP copy into a temporary Garage bucket. |
+   | Control-plane loss | Restore a K3s snapshot with its matching server token, then let Flux reconcile. |
+
+6. Review the single-instance promise honestly. A loss of `lab-01` may interrupt PostgreSQL and Garage even while K3s quorum remains. Your success condition is a documented, tested restore—never an assumption that three control-plane nodes replicate application data.
+
+## What you learned
+
+- Metrics, logs, and alerts are useful only when linked to a recovery decision.
+- Flux makes configuration reconstruction fast; it does not replace data backups.
+- Recovery objectives are measured during drills, not selected by optimism.
+
+## Continue learning
+
+Use the [cheat sheet](./cheat-sheet) for day-two commands and links.

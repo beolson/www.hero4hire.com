@@ -1,0 +1,73 @@
+---
+title: "Step 1: Plan the cluster and prepare Debian hosts"
+description: Establish the failure domains, address plan, storage roles, and repeatable Debian 13 baseline for three bare-metal nodes.
+type: tutorial
+---
+
+# Step 1: Plan the cluster and prepare Debian hosts
+
+This step should take approximately 30 to 40 minutes.
+
+## Overview
+
+You will turn three generic Debian installations into named, reachable cluster candidates. A clear inventory is a safety control: it prevents an SFTP backup target or storage workload from silently sharing the failure domain it is meant to protect.
+
+## Before you start
+
+- Install Debian 13 on all three machines with a non-root administrator account and SSH enabled.
+- Assign fixed LAN addresses, preferably as DHCP reservations.
+- Do not install Docker, a desktop environment, a database, or a GPU driver yet.
+
+## Practice the skill
+
+1. Record the physical and network inventory in the Git repository. Create `docs/inventory.md`; do not commit passwords, private keys, or Cloudflare tokens.
+
+   | Node | Address | Role | Durable disk | Special hardware |
+   | --- | --- | --- | --- | --- |
+   | `lab-01` | `192.168.50.21` | control plane, storage | mirrored SSD/NVMe preferred | — |
+   | `lab-02` | `192.168.50.22` | control plane, general work | SSD | — |
+   | `lab-03` | `192.168.50.23` | control plane, GPU work | SSD/NVMe model cache | NVIDIA GPU |
+
+   Keep the SFTP server in a different failure domain: another host and disk, ideally with separate power or an off-site location.
+
+2. Set each hostname and verify that its address does not change.
+
+   ```bash
+   sudo hostnamectl set-hostname lab-01
+   hostnamectl
+   ip -brief address
+   ```
+
+   Repeat with `lab-02` and `lab-03`. Add all three names and addresses to your workstation's DNS or `/etc/hosts` until local DNS is ready.
+
+3. Update the operating system and install the small set of node tools used throughout the series.
+
+   ```bash
+   sudo apt update
+   sudo apt full-upgrade
+   sudo apt install --yes curl ca-certificates chrony jq nfs-common open-iscsi
+   sudo reboot
+   ```
+
+   K3s and its storage add-ons require a working Linux host; installing these common dependencies now makes later failures more obvious. Reconnect after the reboot and verify `timedatectl status` reports synchronized time.
+
+4. Decide which disk backs durable single-instance services. On `lab-01`, inspect disks before creating or mounting anything:
+
+   ```bash
+   lsblk --fs
+   findmnt /
+   ```
+
+   This tutorial uses K3s local-path storage pinned to `lab-01`. A disk loss is therefore a restore event, not a transparent failover. Prefer a mirrored ZFS or RAID-backed filesystem for this node, but do not confuse local mirroring with a backup.
+
+5. Reserve an unused LAN range for MetalLB. Confirm it is outside your DHCP pool and is not assigned to physical devices. Record it as `192.168.50.240-192.168.50.250` in the inventory.
+
+## What you learned
+
+- A three-node control plane and a single-instance data service have different availability properties.
+- Backup location, power, and disk placement matter as much as backup software.
+- A stable address plan is prerequisite infrastructure, not documentation overhead.
+
+## Continue learning
+
+Continue to [Step 2: Harden access and establish node baselines](./step-02).

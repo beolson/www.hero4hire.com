@@ -1,0 +1,37 @@
+---
+title: "Step 6: Expose only public applications through Cloudflare"
+description: Use Cloudflare Tunnel and a separate public ingress class while preserving a LAN-only route for internal services.
+type: tutorial
+---
+
+# Step 6: Expose only public applications through Cloudflare
+
+This step should take approximately 30 to 40 minutes.
+
+## Overview
+
+Cloudflare Tunnel avoids opening an inbound router port. The tunnel connector makes outbound connections to Cloudflare, which forwards only explicitly configured public hostnames. This is different from the internal Traefik entry point created in Step 4.
+
+## Practice the skill
+
+1. Create a named remotely managed Cloudflare Tunnel in the dashboard. Create a tunnel token, encrypt it with SOPS, and deploy two `cloudflared` replicas through Flux. Do not put the token in a plain Helm values file.
+
+2. Deploy `traefik-public` with a distinct ingress class, `public`, and a ClusterIP Service. Cloudflared reaches this service inside the cluster; it does not need a LAN LoadBalancer address.
+
+3. Add one published hostname in Cloudflare, such as `status.example.net`, that routes to `http://traefik-public.traefik-public.svc.cluster.local:80`. Cloudflare automatically associates the hostname with the tunnel. [Cloudflare's Kubernetes guide](https://developers.cloudflare.com/tunnel/guides/kubernetes/) describes this connector pattern.
+
+4. Deploy the same small test service twice. Its public `Ingress` must name the `public` class; its internal `Ingress` must name the `internal` class. Verify the public hostname works over a mobile connection and the internal hostname does not resolve publicly.
+
+5. Add Cloudflare Access to administrative public sites such as Grafana. Do not publish the Kubernetes API, Garage administration endpoint, or PostgreSQL.
+
+6. Alert on disconnected tunnel connectors. Cloudflare recommends multiple connector replicas for availability, not autoscaling; existing client connections do not migrate during a connector downscale. [Cloudflare Tunnel configuration](https://developers.cloudflare.com/tunnel/configuration/)
+
+## What you learned
+
+- Public exposure is an allow-list of hostname-to-service routes.
+- A separate ingress class makes accidental exposure less likely.
+- Cloudflare Access complements, but does not replace, application authentication.
+
+## Continue learning
+
+Continue to [Step 7: Deploy shared PostgreSQL and prove it can be restored](./step-07).

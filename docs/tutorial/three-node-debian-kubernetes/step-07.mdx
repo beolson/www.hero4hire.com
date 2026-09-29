@@ -1,0 +1,50 @@
+---
+title: "Step 7: Deploy shared PostgreSQL and prove it can be restored"
+description: Run one private PostgreSQL instance, isolate applications by database role, and validate pgBackRest SFTP recovery.
+type: tutorial
+---
+
+# Step 7: Deploy shared PostgreSQL and prove it can be restored
+
+This step should take approximately 30 to 40 minutes.
+
+## Overview
+
+One PostgreSQL instance is a deliberate availability trade-off. The tutorial uses an operator-managed PostgreSQL cluster with one instance, a storage-node selector, and pgBackRest. The success criterion is not a green backup job; it is restoring data into a separate namespace.
+
+## Before you start
+
+- Create a restricted SFTP account and directory such as `/srv/backups/postgres`.
+- Create an SSH key dedicated to PostgreSQL backup and record the SFTP server host key/fingerprint.
+- Never use `StrictHostKeyChecking=no` or a shared personal SFTP account.
+
+## Practice the skill
+
+1. Install Crunchy Postgres for Kubernetes through a version-pinned Flux release. Define a `PostgresCluster` with exactly one instance, a `ReadWriteOnce` PVC, and node affinity for `homelab.example/role=storage`.
+
+2. Create one database and least-privilege role per application. Store generated credentials as individual SOPS-encrypted Secrets. Applications connect only to a private `ClusterIP` service; there is no Ingress for port 5432.
+
+3. Configure pgBackRest WAL archiving, encrypted repository storage, retention, and an SFTP repository. pgBackRest directly supports SFTP repositories, private-key authentication, encryption, retention, and strict host-key checking. [pgBackRest SFTP guide](https://pgbackrest.org/user-guide.html)
+
+4. Schedule a weekly full backup and daily differential backup, with continuous WAL archive. Use a retention policy that matches the capacity of the SFTP target; four full backups is a reasonable initial target.
+
+5. Create a disposable application database, insert a marker, take a backup, then restore into a separate namespace and query the marker.
+
+   ```sql
+   CREATE TABLE restore_proof (message text);
+   INSERT INTO restore_proof VALUES ('restores are real');
+   ```
+
+   Record the restore duration and the latest recoverable point. Delete the test namespace after recording the result.
+
+6. Alert on failed backup, missing WAL archive, insufficient PVC capacity, and an overdue successful restore test.
+
+## What you learned
+
+- One PostgreSQL server can serve many applications without sharing superuser credentials.
+- Database files require database-aware backup and recovery tooling.
+- A restore drill defines your actual recovery time and recovery point.
+
+## Continue learning
+
+Continue to [Step 8: Deploy Garage object storage and back up buckets](./step-08).

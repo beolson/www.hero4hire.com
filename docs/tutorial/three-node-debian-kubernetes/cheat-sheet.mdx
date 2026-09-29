@@ -1,0 +1,47 @@
+---
+title: Cheat sheet
+description: A quick reference for the three-node Debian Kubernetes home lab.
+type: tutorial
+---
+
+# Cheat sheet
+
+## Commands
+
+| Goal | Command | Notes |
+| --- | --- | --- |
+| View nodes | `kubectl get nodes -o wide` | Confirm all three servers are Ready. |
+| Inspect K3s snapshots | `sudo k3s etcd-snapshot ls` | Retain the matching server token off-cluster. |
+| Check Flux | `flux get all -A` | Reconcile errors are deployment failures. |
+| Force Flux source sync | `flux reconcile source git flux-system` | Use after a Git push while diagnosing. |
+| Watch services | `kubectl get svc -A --watch` | Find MetalLB-assigned addresses. |
+| Check PostgreSQL backups | `kubectl get cronjob,job -n postgres` | A successful job is not a tested restore. |
+| Test Garage | `aws --endpoint-url http://garage.garage.svc.cluster.local:3900 s3 ls` | Use a least-privilege test key. |
+| Inspect GPU capacity | `kubectl describe node lab-03` | Look for `nvidia.com/gpu`. |
+| View GPU Operator | `kubectl get pods -n gpu-operator` | Validation and device plugin should be healthy. |
+
+## Concepts
+
+| Term | Reminder |
+| --- | --- |
+| Control-plane HA | Three K3s servers keep etcd quorum after one server loss; it does not replicate application data. |
+| Storage node | `lab-01` hosts intentionally single-instance persistent workloads. A failure requires restore. |
+| Internal ingress | MetalLB/LAN-facing Traefik with `IngressClassName: internal`; no Cloudflare Tunnel route. |
+| Public ingress | ClusterIP public Traefik reached only by `cloudflared`, with `IngressClassName: public`. |
+| GitOps | Git declares desired state; Flux continuously applies it. |
+| SOPS/age | Store encrypted secrets in Git; retain the private age key outside the cluster. |
+| PostgreSQL recovery | pgBackRest full/differential backups plus WAL provide point-in-time recovery. |
+| Garage recovery | Restore dated logical S3 copies from SFTP into a temporary bucket before replacing production data. |
+| GPU taint | Prevents non-GPU workloads from landing on `lab-03` unless they opt in. |
+
+## Resources
+
+- [K3s requirements](https://docs.k3s.io/installation/requirements)
+- [K3s HA embedded etcd](https://docs.k3s.io/datastore/ha-embedded)
+- [K3s backup and restore](https://docs.k3s.io/datastore/backup-restore)
+- [Flux documentation](https://fluxcd.io/flux/)
+- [Cloudflare Tunnel Kubernetes guide](https://developers.cloudflare.com/tunnel/guides/kubernetes/)
+- [pgBackRest user guide](https://pgbackrest.org/user-guide.html)
+- [Garage](https://github.com/deuxfleurs-org/garage)
+- [Kubernetes GPU scheduling](https://kubernetes.io/docs/tasks/manage-gpus/scheduling-gpus/)
+- [NVIDIA GPU Operator](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/)
