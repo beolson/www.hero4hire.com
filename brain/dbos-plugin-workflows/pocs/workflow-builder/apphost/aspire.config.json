@@ -1,0 +1,8 @@
+{
+  "appHost": { "path": "apphost.mts", "language": "typescript/nodejs" },
+  "sdk": { "version": "13.5.4" },
+  "packages": {
+    "Aspire.Hosting.JavaScript": "13.5.4",
+    "Aspire.Hosting.PostgreSQL": "13.5.4"
+  }
+}

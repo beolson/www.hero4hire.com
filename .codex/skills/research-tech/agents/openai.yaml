@@ -1,0 +1,4 @@
+interface:
+  display_name: "Research Technology"
+  short_description: "Research technology with scoped, runnable POCs"
+  default_prompt: "Use $research-tech to scope a technology topic, research it, build and verify POCs, and document findings in brain/."

@@ -1,0 +1,13 @@
+**/node_modules/
+**/dist/
+**/.output/
+**/.tanstack/
+**/.nitro/
+**/bin/
+**/obj/
+**/test-results/
+**/playwright-report/
+**/.aspire/
+**/.vite/
+**/.playwright-cli/
+.runtime/
