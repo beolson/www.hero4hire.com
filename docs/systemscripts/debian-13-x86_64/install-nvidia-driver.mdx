@@ -10,26 +10,31 @@ arch: x86_64
 
 ## What it does
 
-Installs Debian 13 (Trixie)'s proprietary NVIDIA driver and its DKMS kernel module on one x86_64 host. It verifies that it is running as root on Debian 13, adds `contrib`, `non-free`, and `non-free-firmware` to the standard Debian APT source file, refreshes APT metadata, installs headers for the running kernel, and installs `nvidia-kernel-dkms` and `nvidia-driver`.
+Installs Debian 13 (Trixie)'s proprietary NVIDIA driver and its DKMS kernel module on one x86_64 host. It verifies that it is running as root on Debian 13, adds `contrib`, `non-free`, and `non-free-firmware` to supported Debian APT source files, refreshes APT metadata, installs headers for the running kernel, and installs `nvidia-kernel-dkms` and `nvidia-driver`.
 
-The script modifies `/etc/apt/sources.list.d/debian.sources` and saves a same-directory `.bak` copy first. It does not configure CUDA, containers, X11 or Wayland, GPU passthrough, or Secure Boot key enrollment. Run it during a maintenance window: package installation can replace the kernel, and a reboot is required before the NVIDIA module can be loaded. On a Secure Boot-enabled system, complete the MOK enrollment prompted by DKMS before rebooting or the unsigned module will not load.
+The script supports `/etc/apt/sources.list.d/debian.sources` (deb822 format) and `/etc/apt/sources.list` (one-line format), including the Debian netinst layout. It modifies each supported file containing active Trixie sources and saves a same-directory `.nvidia-driver.bak` copy first. It does not configure CUDA, containers, X11 or Wayland, GPU passthrough, or Secure Boot key enrollment. Run it during a maintenance window: package installation can replace the kernel, and a reboot is required before the NVIDIA module can be loaded. On a Secure Boot-enabled system, complete the MOK enrollment prompted by DKMS before rebooting or the unsigned module will not load.
 
-This uses the proprietary kernel-module flavor for broad support across the GPUs supported by Debian's packaged driver. It intentionally stops if the standard Debian 13 deb822 source file is absent rather than guessing how to modify a custom mirror or third-party source configuration.
+This uses the proprietary kernel-module flavor for broad support across the GPUs supported by Debian's packaged driver. It stops if neither supported source file contains Trixie entries. Custom filenames under `/etc/apt/sources.list.d/` require manual configuration.
 
-After its first successful run, the script records version `1.0.0` in `/var/lib/hero4hire/system-scripts/debian-13-x86_64-install-nvidia-driver.version`. Later runs stop before changing the host, including when a newer downloaded script has a different version. Remove that marker only after reviewing the installed driver, source configuration, and script changes; it is not a routine retry mechanism.
+After its first successful run, the script records version `1.1.0` in `/var/lib/hero4hire/system-scripts/debian-13-x86_64-install-nvidia-driver.version`. Later runs stop before changing the host, including when a newer downloaded script has a different version. Remove that marker only after reviewing the installed driver, source configuration, and script changes; it is not a routine retry mechanism.
 
 <SystemScript
   os="debian"
   version="13"
   arch="x86_64"
+  requiresRoot
   scriptUrl="/scripts/debian-13-x86_64/install-nvidia-driver.sh"
 />
+
+Run the download command as your normal user with `curl` and `sudo` installed. It downloads the script using command substitution and passes it to `sudo bash -c`, keeping your terminal available for prompts. Check for curl errors: this compact command does not propagate download failures to Bash. If you are already root, replace `sudo bash` with `bash`.
+
+Do not prefix `bash <(curl ...)` with `sudo`: Bash's process substitution uses a file descriptor that `sudo` normally closes, causing errors such as `bash: /dev/fd/63: No such file or directory` before the installer starts.
 
 ## How it works
 
 The driver is distributed by Debian as the `nvidia-driver` metapackage in the `non-free` component. Its DKMS kernel-module package builds a module for the installed kernel, so the script first installs the headers matching `uname -r`. It does not use NVIDIA's standalone installer, which is outside Debian's package management and can complicate kernel upgrades.
 
-Debian's NVIDIA guidance requires `contrib`, `non-free`, and `non-free-firmware` for Trixie sources. The script accepts the default deb822 source file only, makes an archive-preserving backup beside it, and adds each required component only when missing. It then uses `apt-get` to refresh available packages and install the driver stack. The `.bak` extension keeps the backup from being read as an APT source.
+Debian's NVIDIA guidance requires `contrib`, `non-free`, and `non-free-firmware` for Trixie sources. The script makes an archive-preserving backup beside each supported source file and adds each required component only when missing. For one-line sources, it updates active `deb` and `deb-src` entries for `trixie`, `trixie-security`, and `trixie-updates`, preserving comments, repository URLs, and options. Commented CD-ROM entries and other suites remain unchanged. It then uses `apt-get` to refresh available packages and install the driver stack. The `.bak` extension keeps the backup from being read as an APT source.
 
 DKMS may prompt for a Machine Owner Key (MOK) password when Secure Boot is enabled. This is expected; enroll that key in the firmware screen on the next boot. Reboot after a successful installation, then use `nvidia-smi` to confirm that the loaded module and userspace tools can communicate with the GPU. Debian's packaged Trixie driver does not support every NVIDIA GPU generation; review the NVIDIA Graphics Drivers guidance before using it with older hardware or an RTX 50-series (Blackwell) GPU.
 
@@ -44,12 +49,16 @@ The completion marker is written only after the package installation succeeds. I
 | `id` | `-u` | Verifies that the effective user is root. |
 | `uname` | `-m` | Confirms the machine is x86_64. |
 |  | `-r` | Supplies the running kernel release used to select matching headers. |
-| `grep` | `-E` | Checks that the standard source file targets a Trixie suite and that required APT components are present. |
+| `grep` | `-E` | Checks that supported source files target a Trixie suite and that required APT components are present. |
 |  | `-q` | Performs those checks without printing matching text. |
 | `cp` | `--archive` | Preserves a metadata-aware backup of the APT source file before it is changed. |
 | `cat` |  | Reads a prior completion-marker version when preventing a repeat run. |
 | `install` | `-d -m 0755` | Creates the root-owned Hero4Hire marker directory after a successful installation. |
 |  | `-m 0644 /dev/stdin` | Writes the completed script version marker. |
+| `awk` | `-v source_pattern` | Adds missing components to active one-line Trixie entries while preserving comments. |
+| `mktemp` | | Creates a temporary file for the updated one-line sources. |
+| `trap` | `EXIT` | Removes the temporary file if the update fails. |
+| `rm` | `-f` | Removes the temporary file after the source update. |
 | `sed` | `-i` | Adds missing repository components directly to `Components:` fields. |
 | `apt-get` | `update` | Refreshes local package metadata after the source components change. |
 |  | `install --yes` | Installs noninteractively after APT resolves the driver, DKMS, and header dependencies. |
@@ -62,4 +71,8 @@ The completion marker is written only after the package installation succeeds. I
 
 ## References
 
+Bash's [process substitution documentation](https://www.gnu.org/software/bash/manual/html_node/Process-Substitution.html) explains the generated file descriptor path. The [sudo manual](https://www.sudo.ws/docs/man/1.9.14/sudoers.man.pdf) documents its default behavior of closing file descriptors other than standard input, output, and error.
+
 Debian's [NVIDIA Graphics Drivers guide](https://wiki.debian.org/NvidiaGraphicsDrivers) documents the required Trixie APT components, the `nvidia-kernel-dkms` and `nvidia-driver` packages, GPU support limitations, and Secure Boot considerations. The Debian package index describes the [Trixie `nvidia-driver` metapackage](https://packages.debian.org/trixie/nvidia-driver) and its availability in `non-free`. Debian's [Debian 13 release notes](https://www.debian.org/releases/stable/release-notes/) cover release-specific operational considerations.
+
+Debian's [sources.list manual](https://manpages.debian.org/trixie/apt/sources.list.5.en.html) describes one-line and deb822 source formats, repository options, and components.

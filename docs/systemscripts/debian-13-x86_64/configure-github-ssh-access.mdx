@@ -40,6 +40,8 @@ The root-owned helper is started by systemd as the target user, so its recurring
 
 The timer uses an `OnCalendar` expression for six four-hourly runs each day and `Persistent=true` to catch up once after a missed calendar event. The initial service run must succeed before the script installs the SSH policy. The managed drop-in is then tested with `sshd -t`; a failed test restores the prior version and does not reload the daemon. A reload, rather than restart, avoids needlessly terminating existing SSH sessions.
 
+The script is rerunnable: rerunning it replaces the managed helper, configuration, service, and timer and retries the initial key refresh. If an earlier helper failed with `curl: (3) URL rejected: Bad hostname`, rerun the corrected script from the same non-root account. That failure occurred before the installer enabled the timer or changed SSH authentication on that run; an existing timer or SSH policy from an earlier run remains in place.
+
 `AuthenticationMethods publickey` is the setting that makes public-key authentication mandatory. The related settings disable other interactive and network authentication methods explicitly. This affects every SSH account on the host; it does not disable root public-key authentication or manage other users' authorized keys.
 
 ### Commands Used
