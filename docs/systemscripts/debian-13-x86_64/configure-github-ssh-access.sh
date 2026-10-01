@@ -129,7 +129,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 --max-time 30 \\
+curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 --max-time 30 \
   "https://github.com/$github_username.keys" > "$temporary_keys"
 
 if [ ! -s "$temporary_keys" ]; then

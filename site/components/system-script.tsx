@@ -20,6 +20,7 @@ type SystemScriptProps = {
   arch: string;
   parameters?: SystemScriptParameter[];
   scriptUrl: string;
+  requiresRoot?: boolean;
 };
 
 function substituteParameters(script: string, values: Record<string, string>) {
@@ -43,6 +44,7 @@ function createDownloadCommand(
   scriptUrl: string,
   parameters: SystemScriptParameter[],
   values: Record<string, string>,
+  requiresRoot: boolean,
 ) {
   const argumentsToPass = parameters.flatMap((parameter) => {
     if (parameter.type === "password") return [];
@@ -53,7 +55,8 @@ function createDownloadCommand(
       : [];
   });
 
-  return `bash <(curl -fsSL ${origin}${scriptUrl})${argumentsToPass.length ? ` ${argumentsToPass.join(" ")}` : ""}`;
+  const runner = requiresRoot ? "sudo bash" : "bash";
+  return `${runner} -c "$(curl -fsSL ${quoteShellArgument(`${origin}${scriptUrl}`)})"${argumentsToPass.length ? ` -- ${argumentsToPass.join(" ")}` : ""}`;
 }
 
 function formatLabel(value: string | undefined) {
@@ -89,6 +92,7 @@ export function SystemScript({
   arch,
   parameters = [],
   scriptUrl,
+  requiresRoot = false,
 }: SystemScriptProps) {
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(
@@ -107,8 +111,15 @@ export function SystemScript({
     return substituteParameters(script, values);
   }, [script, values]);
   const downloadCommand = useMemo(
-    () => createDownloadCommand(origin, scriptUrl, parameters, values),
-    [origin, parameters, scriptUrl, values],
+    () =>
+      createDownloadCommand(
+        origin,
+        scriptUrl,
+        parameters,
+        values,
+        requiresRoot,
+      ),
+    [origin, parameters, scriptUrl, values, requiresRoot],
   );
   const canCopyScript = parameters.every(
     (parameter) => !parameter.required || values[parameter.name]?.trim(),
@@ -214,7 +225,13 @@ export function SystemScript({
 
     try {
       await copyText(
-        createDownloadCommand(origin, scriptUrl, parameters, currentValues),
+        createDownloadCommand(
+          origin,
+          scriptUrl,
+          parameters,
+          currentValues,
+          requiresRoot,
+        ),
       );
       setCopyFailed(false);
       setCopiedDownload(true);
