@@ -1,5 +1,8 @@
 {
   "title": "How-To Guides",
   "defaultOpen": false,
-  "pages": ["create-a-proxmox-vm-with-gpu-passthrough"]
+  "pages": [
+    "create-a-proxmox-vm-with-gpu-passthrough",
+    "disable-secure-boot-on-a-proxmox-vm"
+  ]
 }
