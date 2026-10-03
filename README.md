@@ -35,6 +35,14 @@ Blog posts live directly in `blog/` and require `title`, `description`, `author`
 
 ## Code quality
 
+Check all project `.sh` files with Bash syntax validation, ShellCheck, and shfmt:
+
+```bash
+./check-bash.sh
+```
+
+Install `shellcheck` and `shfmt` before running the checker. It includes tracked and new scripts, skips Git-ignored dependencies and generated files, and checks formatting with 2-space indentation without modifying files. A failed check returns a nonzero exit status.
+
 Biome handles both linting and formatting:
 
 ```bash
