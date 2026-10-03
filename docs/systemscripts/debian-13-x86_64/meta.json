@@ -2,6 +2,7 @@
   "title": "Debian 13 x86_64",
   "defaultOpen": false,
   "pages": [
+    "install-developer-tools",
     "install-nvidia-driver",
     "configure-github-ssh-access",
     "disable-cdrom-apt-sources"
