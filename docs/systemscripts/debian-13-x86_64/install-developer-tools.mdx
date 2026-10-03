@@ -1,0 +1,91 @@
+---
+title: Install developer tools
+type: system-script
+os: debian
+version: "13"
+arch: x86_64
+---
+
+# Install developer tools
+
+## What it does
+
+Bootstraps one Debian 13 (Trixie) x86_64 development machine. It refreshes APT metadata, upgrades installed packages, and installs Oh My Bash with the Agnoster theme, Bun, GitHub CLI (`gh`), Azure CLI (`az`), Azure Developer CLI (`azd`), Codex CLI, [Herdr](https://herdr.dev/), uv, Podman, and Aspire CLI.
+
+Run the script as the non-root account that will use these tools. That account must have a writable home directory and permission to use `sudo`; the script prompts for elevated access itself. Outbound HTTPS access to the vendors, GitHub releases, npm, and APT repositories is required. The download command also requires `curl` already available. No form inputs are needed because the operating system and invoking account determine the installation target.
+
+APT upgrades affect the whole host and may restart services or prompt about existing configuration files. The script adds GitHub and Microsoft APT sources, installs prerequisites including Node.js/npm for the Codex and Aspire launchers, and backs up shell startup files before changing them. User tools live beneath the invoking user's home directory; `gh`, `az`, Podman, and APT dependencies are system packages. It does not sign in to cloud services or automatically reboot.
+
+<SystemScript
+  os="debian"
+  version="13"
+  arch="x86_64"
+  parameters={[]}
+  scriptUrl="/scripts/debian-13-x86_64/install-developer-tools.sh"
+/>
+
+## How it works
+
+The script checks Debian 13, the amd64 package architecture, the x86_64 kernel architecture, the invoking account's home, and sudo access. A host-wide lock prevents simultaneous runs. `apt-get update` refreshes package indexes and `apt-get upgrade --yes` upgrades packages without removing installed packages. This is a same-release upgrade; packages requiring new dependencies may be held back. Git, curl, CA certificates, GnuPG, archive utilities, Node.js, and npm support the requested installers. Podman's `uidmap`, `slirp4netns`, and `fuse-overlayfs` packages support rootless use.
+
+GitHub CLI uses its official APT repository. Azure CLI uses Microsoft's signed repository with the `bookworm` suite: Microsoft's documentation lists Debian 11 and 12 as tested and explicitly recommends the earlier Bookworm repository when a Debian release has no package. This is a documented compatibility fallback for Debian 13, not a claim that Microsoft has tested Debian 13. Both repositories scope signing keys through `Signed-By`. Existing source entries for these vendors should be reviewed before use to avoid duplicate or conflicting entries.
+
+Oh My Bash's unattended installer configures Bash without launching a new shell. The script saves `.bashrc`, `.profile`, and `.bash_profile`, when present, in a unique `~/.hero4hire-shell-backup.*` directory first. It sets `OSH_THEME="agnoster"` before Oh My Bash loads. An existing installation is reused; an incomplete installation or a `.bashrc` that does not load it stops the script for manual review. The upstream installer may replace `.bashrc`; use the backup to restore customizations. Select a Powerline-compatible font in your terminal, including the local terminal used for SSH, so Agnoster's glyphs render correctly.
+
+Bun, Azure Developer CLI, Herdr, and uv use their official HTTPS installers, downloaded to temporary files before execution. Azure Developer CLI, Herdr, and uv are directed into user-owned locations. Codex and Aspire use their official npm packages with a user-local global prefix. These commands install the current stable/latest versions available when run, rather than a reproducible pinned toolchain. Vendor scripts and npm lifecycle scripts execute code as the invoking user, and the Azure Developer CLI installer may invoke sudo if its destination requires it. Review vendor installers when your environment requires a fixed trust or version policy.
+
+The script adds `~/.local/bin` and `~/.bun/bin` to Bash startup files and the current script's PATH, then checks each CLI's version and the Agnoster theme file. Open a new Bash terminal afterward. These checks confirm executable availability; authentication and application workloads need separate setup. Use `gh auth login`, `az login`, `azd auth login`, and `codex` when ready to authenticate.
+
+Installing Podman does not prove that rootless containers work. Check the account's entries in `/etc/subuid` and `/etc/subgid` and run `podman info` after installation. For Aspire applications, set `ASPIRE_CONTAINER_RUNTIME=podman` as described in Aspire's prerequisites. Integrations that use a Docker-compatible API may additionally need a Podman socket. Language SDKs, application dependencies, registry authentication, and container socket setup depend on the project and are outside this bootstrap.
+
+This is a run-once host bootstrap. Only after every verification succeeds does it write version `1.0.0` to `/var/lib/hero4hire/system-scripts/debian-13-x86_64-install-developer-tools.version`. Any existing marker blocks execution, including newer script versions and runs by another account. An operator must deliberately review and remove that marker to authorize another bootstrap. A failed run leaves earlier changes in place and no new marker; retrying can repeat upgrades and update tools. The script is not transactional and provides no package rollback. Review any upgrade-related reboot requirement yourself.
+
+### Commands Used
+
+<div className="command-reference-table">
+
+| Command | Argument | Description |
+| --- | --- | --- |
+| `dpkg` | | Checks Debian's package architecture. |
+| | `--print-architecture` | Requires `amd64`. |
+| `sudo` | | Elevates system operations while user installers run as the invoking account. |
+| | `-v` | Validates sudo credentials before making changes. |
+| `flock` | | Serializes the host-wide bootstrap. |
+| | `-n 9` | Fails immediately if another process holds the lock. |
+| `apt-get` | | Manages system packages and repository indexes. |
+| | `update` | Refreshes indexes before upgrades and after repository configuration. |
+| | `upgrade --yes` | Upgrades existing packages within configured repositories. |
+| | `install --yes` | Installs requested system tools and necessary dependencies. |
+| `curl` | | Downloads signing keys and official installer scripts. |
+| | `--fail --location --proto '=https' --proto-redir '=https'` | Rejects HTTP errors and limits transfers and redirects to HTTPS. |
+| | `--retry 3 --tlsv1.2` | Retries transient failures and requires TLS 1.2 or newer. |
+| `gpg` | | Converts Microsoft's armored signing key. |
+| | `--batch --yes --dearmor` | Writes a binary keyring without prompting. |
+| `install` | | Creates directories and copies repository files with explicit permissions. |
+| | `-d -m 0755`, `-m 0644` | Sets directory and file permissions for APT and marker storage. |
+| `cp` | | Backs up shell configuration files. |
+| | `-a` | Preserves their metadata. |
+| `sed` | | Sets the Agnoster theme before Oh My Bash loads. |
+| | `-i` | Edits `.bashrc` after its backup is created. |
+| `bash`, `sh` | | Runs downloaded vendor installers with the required shell. |
+| | `--unattended` | Tells Oh My Bash to avoid launching a shell or changing the default shell. |
+| | `--install-folder`, `--symlink-folder` | Places Azure Developer CLI in user-owned directories. |
+| `npm` | | Installs the Codex and Aspire CLI packages. |
+| | `install --global --prefix "$HOME/.local"` | Installs globally for the invoking user without root privileges. |
+| `tee` | | Writes the success marker through sudo. |
+| | `<marker path>` | Stores the script version only after all checks pass. |
+
+</div>
+
+## References
+
+- Debian's [APT command manual](https://manpages.debian.org/trixie/apt/apt-get.8.en.html) explains update, upgrade, and package installation; its [Podman package page](https://packages.debian.org/trixie/podman) lists container dependencies.
+- [Oh My Bash installation and themes](https://github.com/ohmybash/oh-my-bash) documents unattended installation, `OSH_THEME`, and Agnoster's font requirements.
+- [Bun installation](https://bun.sh/docs/installation) documents the Linux installer and unzip prerequisite.
+- [GitHub CLI Linux installation](https://github.com/cli/cli/blob/trunk/docs/install_linux.md) documents its signed APT repository.
+- [Azure CLI Linux installation](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli-linux) documents supported distributions, repository setup, and the earlier-distribution fallback.
+- [Azure Developer CLI installation](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/install-azd) and its [installer source](https://github.com/Azure/azure-dev/blob/main/cli/installer/install-azd.sh) document installation and destination arguments.
+- [Codex quickstart](https://developers.openai.com/codex/quickstart) documents CLI installation and sign-in.
+- [Herdr installation](https://herdr.dev/docs/install/) and its [installer](https://herdr.dev/install.sh) document the Linux binary installation.
+- [uv installation](https://docs.astral.sh/uv/getting-started/installation/) and [installer options](https://docs.astral.sh/uv/reference/installer/) document the standalone installer and `UV_INSTALL_DIR`.
+- [Aspire CLI installation](https://aspire.dev/get-started/install-cli/) documents the npm package and CLI verification. [Aspire prerequisites](https://learn.microsoft.com/en-us/dotnet/aspire/fundamentals/setup-tooling) describes the additional container runtime configuration.
