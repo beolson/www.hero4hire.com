@@ -1,0 +1,68 @@
+---
+title: Disable Secure Boot on a Proxmox VM
+description: Turn off Secure Boot in a Proxmox VM's UEFI firmware when it prevents an NVIDIA driver from loading.
+type: how-to
+---
+
+# Disable Secure Boot on a Proxmox VM
+
+## Overview
+
+Disable Secure Boot in a Proxmox virtual machine (VM) when it blocks an unsigned NVIDIA kernel driver from loading in the Linux guest. This guide uses **Esc** during startup to enter the VM's firmware settings, with `fwsetup` as a fallback if you reach the GRUB command line.
+
+Secure Boot checks signatures on boot software and kernel modules. Disabling it removes that protection for this VM. NVIDIA drivers can also work with Secure Boot enabled when their modules are signed and trusted; see Ubuntu's [NVIDIA driver installation guide](https://ubuntu.com/server/docs/how-to/graphics/install-nvidia-drivers/) for that approach.
+
+## Before you begin
+
+- Confirm the VM uses **OVMF (UEFI)** under **Hardware > BIOS** in Proxmox VE and has an **EFI Disk** to persist firmware settings. This procedure applies to the VM's firmware, rather than the host's firmware.
+- Configure [GPU passthrough](./create-a-proxmox-vm-with-gpu-passthrough) and install the NVIDIA driver in the guest before checking GPU access.
+- Arrange a restart and access to the VM's boot screen. Use the Proxmox **Console** if the VM has a virtual display. If the passed-through GPU is the primary display and **Display** is **None**, use a monitor and keyboard attached to the guest through passthrough; noVNC cannot display that GPU's output.
+- Have a Linux guest login available. The verification steps use `mokutil` and `nvidia-smi`; install `mokutil` through the guest's package manager if needed. `nvidia-smi` comes with the NVIDIA driver utilities.
+
+## Turn off Secure Boot in the VM firmware
+
+1. Open the VM's console or physical display before restarting the guest normally.
+
+2. Press **Esc** repeatedly as the VM starts, before Linux or GRUB loads, to open the OVMF firmware menu.
+
+   If the guest boots normally, restart and try again with the console focused earlier. If you reach the GRUB menu, press **c** to open its command line, then use the fallback below.
+
+   If you see a `grub>` prompt, enter:
+
+   ```text
+   fwsetup
+   ```
+
+   This [GRUB command](https://www.gnu.org/software/grub/manual/grub/html_node/fwsetup.html) reboots into the firmware setup menu. Enter only `fwsetup`, without the prompt. If it is unavailable or you see `grub rescue>`, retry **Esc** during a restart instead.
+
+3. Select **Device Manager > Secure Boot Configuration** in the firmware menu, using the arrow keys and **Enter**.
+
+4. Select **Attempt Secure Boot** and press **Space** to clear its checkbox, removing the **X**.
+
+   The [OVMF firmware setting](https://github.com/tianocore/edk2/blob/master/SecurityPkg/VariableAuthenticated/SecureBootConfigDxe/SecureBootConfigStrings.uni) takes effect after a reset. The displayed **Current Secure Boot State** may still show enabled until then. Leave the Secure Boot keys in place; clearing this checkbox is enough.
+
+5. Press **Esc** to return to the main firmware menu, saving the change if prompted.
+
+6. Select **Reset** to restart the VM with the updated setting.
+
+7. Sign in to the Linux guest and check Secure Boot:
+
+   ```bash
+   mokutil --sb-state
+   ```
+
+   Expect `SecureBoot disabled`. If it still reports enabled, revisit the firmware menu and confirm the checkbox is cleared and the change was saved. If it reports that EFI variables are unsupported, confirm the guest actually booted in UEFI mode; that message does not verify the setting.
+
+8. Check that the NVIDIA driver can access the passed-through GPU:
+
+   ```bash
+   nvidia-smi
+   ```
+
+   Expect a table listing the GPU and driver version. If Secure Boot is disabled but this command fails, check the guest's NVIDIA driver installation and Proxmox PCI passthrough configuration. Turning off Secure Boot alone does not install a driver or attach a GPU.
+
+## See also
+
+- [Create a Proxmox VM with GPU passthrough](./create-a-proxmox-vm-with-gpu-passthrough)
+- [Ubuntu UEFI Secure Boot](https://documentation.ubuntu.com/security/security-features/platform-protections/secure-boot/)
+- [Ubuntu NVIDIA driver installation](https://ubuntu.com/server/docs/how-to/graphics/install-nvidia-drivers/)
